@@ -133,12 +133,31 @@ def run_defect_rules(
     local_anomaly = detect_local_anomaly(roi, config)
     glass_burn = detect_glass_burn(frame, roi, config)
     dark_crack = detect_dark_crack_like_regions(frame, roi, config)
+    raw_fiber = detect_raw_fiber(frame, roi, config)
+    if bool(dark_crack.get("raw_fiber_relief_like", False)):
+        relief_score = min(1.0, max(float(dark_crack.get("score", 0.0)) * 0.88, 0.62))
+        raw_fiber = {
+            **raw_fiber,
+            "score": relief_score,
+            "is_suspicious": True,
+            "message": "Kabarik/lifsi cig elyaf dokusu supheli.",
+            "strategy": f"{raw_fiber.get('strategy', '')}; kabarik lifsi dikey relief yeniden siniflandirma",
+            "mask": raw_fiber.get("mask") if raw_fiber.get("mask") is not None else dark_crack.get("mask"),
+            "relief_reclassified": True,
+        }
+        dark_crack = {
+            **dark_crack,
+            "score": min(float(dark_crack.get("score", 0.0)), 0.22),
+            "is_suspicious": False,
+            "message": "Cizgisel sinyal cig elyaf relief olarak siniflandi.",
+            "suppressed_by_raw_fiber": True,
+        }
     return {
         "edge_damage": detect_edge_damage(frame, roi, bbox, config),
         "deformation": detect_shape_deformation(frame, roi, bbox, config),
         "color_anomaly": detect_color_anomaly(frame, roi, config),
         "glass_burn": glass_burn,
-        "raw_fiber": detect_raw_fiber(frame, roi, config),
+        "raw_fiber": raw_fiber,
         "dark_crack": dark_crack,
         "local_anomaly": local_anomaly,
     }

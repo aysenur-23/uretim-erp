@@ -131,10 +131,25 @@ def detect_glass_burn(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> 
 
     burn_ratio = float(cv2.countNonZero(burn_mask)) / float(max(1, valid_area))
     largest_ratio = _largest_component_area_ratio(burn_mask, valid_area)
+    mask_pixels = burn_mask > 0
+    if np.any(mask_pixels):
+        mean_mask_sat = float(np.mean(sat[mask_pixels]))
+        mean_mask_corrected_v = float(np.mean(corrected_v[mask_pixels]))
+    else:
+        mean_mask_sat = 0.0
+        mean_mask_corrected_v = 255.0
     score = _clip01(max(burn_ratio * 5.0, largest_ratio * 12.0))
-    is_suspicious = score >= max(0.16, config.color_anomaly_threshold * 0.50)
+    color_is_burn_like = mean_mask_sat >= 70.0 or mean_mask_corrected_v <= 90.0
+    compact_burn_like = burn_ratio >= 0.020 and largest_ratio >= 0.010
+    is_suspicious = (
+        score >= max(0.14, config.color_anomaly_threshold * 0.45)
+        and compact_burn_like
+        and color_is_burn_like
+    )
     if is_suspicious:
         score = max(score, 0.72)
+    else:
+        score = min(score, 0.24)
 
     return {
         **_result(
@@ -146,6 +161,8 @@ def detect_glass_burn(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> 
         "mask": burn_mask if cv2.countNonZero(burn_mask) > 0 else None,
         "burn_ratio": round(burn_ratio, 4),
         "largest_component_ratio": round(largest_ratio, 4),
+        "mean_mask_sat": round(mean_mask_sat, 4),
+        "mean_mask_corrected_v": round(mean_mask_corrected_v, 4),
         "local_threshold": round(local_threshold, 4),
         "corrected_dark_threshold": round(corrected_dark_threshold, 4),
     }
@@ -286,16 +303,32 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
     line_evidence = (
         crack_stats["max_length_ratio"] >= 0.26
         or (crack_stats["vertical_coverage"] >= 0.45 and crack_stats["max_length_ratio"] >= 0.22)
+        or (
+            crack_stats["vertical_coverage"] >= 0.42
+            and crack_stats["component_count"] >= 3
+            and crack_area_ratio <= 0.018
+        )
     )
     broad_stain_like = crack_area_ratio >= 0.08 and crack_stats["max_length_ratio"] < 0.22
+    raw_fiber_relief_like = (
+        0.018 <= crack_area_ratio <= 0.040
+        and crack_stats["max_length_ratio"] >= 0.28
+        and crack_stats["component_count"] >= 4
+    )
     is_suspicious = (
         not dense_texture
         and not broad_stain_like
+        and not raw_fiber_relief_like
         and line_evidence
         and (
             score >= config.crack_darkness_threshold
             or crack_stats["max_length_ratio"] >= 0.30
             or (crack_stats["vertical_coverage"] >= 0.34 and score >= 0.24)
+            or (
+                crack_stats["vertical_coverage"] >= 0.42
+                and crack_stats["component_count"] >= 3
+                and crack_area_ratio <= 0.018
+            )
         )
     )
 
@@ -311,6 +344,7 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
         "crack_area_ratio": round(crack_area_ratio, 4),
         "dense_texture": dense_texture,
         "broad_stain_like": broad_stain_like,
+        "raw_fiber_relief_like": raw_fiber_relief_like,
         "max_length_ratio": round(crack_stats["max_length_ratio"], 4),
         "vertical_coverage": round(crack_stats["vertical_coverage"], 4),
     }

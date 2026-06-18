@@ -298,9 +298,18 @@ def _defects_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
     taxonomy_defects = []
+    display_thresholds = {
+        "edge_damage": 0.35,
+        "deformation": 0.24,
+        "glass_burn": 0.25,
+        "raw_fiber": 0.25,
+        "color_anomaly": 0.30,
+        "dark_crack": 0.30,
+        "local_anomaly": 0.30,
+    }
     for meta in ordered_defects():
         score = float(record.get(meta.score_key) or 0.0)
-        if score < 0.25:
+        if score < display_thresholds.get(meta.defect_type, 0.25):
             continue
         taxonomy_defects.append(
             {
