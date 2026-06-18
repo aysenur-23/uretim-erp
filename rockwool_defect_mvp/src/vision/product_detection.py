@@ -49,6 +49,7 @@ def find_product_roi(image: np.ndarray, config: AppConfig) -> ProductROI | None:
     rotated_box = _rotated_box_points(contour)
     shape_mask = _mask_from_rotated_box(image.shape, rotated_box)
     shape_mask = _refine_shape_mask_by_panel_color(image, shape_mask, config)
+    shape_mask = _snap_shape_mask_to_panel_edges(image, shape_mask)
     rotated_box = _box_from_mask(shape_mask) or rotated_box
     shape_bbox, shape_roi, shape_mask_roi = _extract_shape_roi(image, shape_mask)
     contour_area = float(cv2.contourArea(contour))
@@ -306,6 +307,78 @@ def _refine_shape_mask_by_panel_color(
             refined = candidate
 
     return refined
+
+
+def _snap_shape_mask_to_panel_edges(image: np.ndarray, shape_mask: np.ndarray) -> np.ndarray:
+    shape_bbox, _, _ = _extract_shape_roi(image, shape_mask)
+    x, y, width, height = shape_bbox
+    if width < 30 or height < 30:
+        return shape_mask
+
+    image_height, image_width = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 45, 130)
+    edge_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    edges = cv2.dilate(edges, edge_kernel, iterations=1)
+
+    x_pad = max(10, int(width * 0.06))
+    y_pad = max(10, int(height * 0.06))
+    left = _snap_side_from_profile(edges.mean(axis=0), x, x_pad, image_width, prefer="left")
+    right = _snap_side_from_profile(edges.mean(axis=0), x + width - 1, x_pad, image_width, prefer="right")
+    top = _snap_side_from_profile(edges.mean(axis=1), y, y_pad, image_height, prefer="left")
+    bottom = _snap_side_from_profile(edges.mean(axis=1), y + height - 1, y_pad, image_height, prefer="right")
+
+    nx1 = min(left if left is not None else x, x)
+    ny1 = min(top if top is not None else y, y)
+    nx2 = max(right if right is not None else x + width - 1, x + width - 1)
+    ny2 = max(bottom if bottom is not None else y + height - 1, y + height - 1)
+    new_width = nx2 - nx1 + 1
+    new_height = ny2 - ny1 + 1
+    if new_width <= 0 or new_height <= 0:
+        return shape_mask
+
+    old_area = float(width * height)
+    new_area = float(new_width * new_height)
+    if new_area > old_area * 1.18 or new_area < old_area * 0.98:
+        return shape_mask
+
+    movement = abs(nx1 - x) + abs(ny1 - y) + abs(nx2 - (x + width - 1)) + abs(ny2 - (y + height - 1))
+    if movement < 3:
+        return shape_mask
+
+    snapped = np.zeros_like(shape_mask)
+    cv2.rectangle(snapped, (nx1, ny1), (nx2, ny2), 255, -1)
+    return snapped
+
+
+def _snap_side_from_profile(
+    profile: np.ndarray,
+    side: int,
+    pad: int,
+    limit: int,
+    *,
+    prefer: str,
+) -> int | None:
+    start = max(0, side - pad)
+    end = min(limit - 1, side + pad)
+    if end <= start:
+        return None
+
+    window = profile[start : end + 1].astype(np.float32)
+    if window.size == 0:
+        return None
+
+    local_max = float(window.max())
+    background = float(np.percentile(profile.astype(np.float32), 72))
+    if local_max < max(8.0, background * 1.25):
+        return None
+
+    threshold = local_max * 0.82
+    candidates = np.where(window >= threshold)[0]
+    if candidates.size == 0:
+        return None
+    index = int(candidates[0] if prefer == "left" else candidates[-1])
+    return start + index
 
 
 def _dominant_profile_range(profile: np.ndarray, threshold: float) -> tuple[int, int] | None:

@@ -15,8 +15,21 @@ export type CardItem = {
   pending?: boolean;
 };
 
-export function ResultCard({ item, onOpen }: { item: CardItem; onOpen?: (id: string) => void }) {
+export function ResultCard({
+  item,
+  onOpen,
+  onReprocess,
+  onDelete,
+  actionBusy,
+}: {
+  item: CardItem;
+  onOpen?: (id: string) => void;
+  onReprocess?: (id: string) => void;
+  onDelete?: (id: string) => void;
+  actionBusy?: boolean;
+}) {
   const [showOverlay, setShowOverlay] = useState(true);
+  const canAct = !item.pending && !actionBusy;
   return (
     <div className="card overflow-hidden group">
       <div
@@ -47,6 +60,30 @@ export function ResultCard({ item, onOpen }: { item: CardItem; onOpen?: (id: str
         </div>
         {!item.pending && <DefectChips defects={item.defects} />}
         {item.meta && <div className="text-[10px] text-[var(--text-muted)]">{item.meta}</div>}
+        {!item.pending && (onReprocess || onDelete) && (
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            {onReprocess && (
+              <button
+                type="button"
+                disabled={!canAct}
+                onClick={(e) => { e.stopPropagation(); onReprocess(item.id); }}
+                className="btn btn-outline text-xs py-2 disabled:opacity-50"
+              >
+                {actionBusy ? "İşleniyor..." : "Tekrar tara"}
+              </button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                disabled={!canAct}
+                onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+                className="btn btn-outline text-xs py-2 text-[var(--mega-red)] disabled:opacity-50"
+              >
+                Sil
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

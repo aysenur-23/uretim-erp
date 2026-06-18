@@ -52,6 +52,7 @@ export default function AppShell({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [detail, setDetail] = useState<DetailItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionId, setActionId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const [analysesRes, statsRes, referenceRes] = await Promise.all([
@@ -82,19 +83,7 @@ export default function AppShell({
   function openDetail(id: string) {
     const item = stored.find((x) => x.id === id);
     if (!item) return;
-    setDetail({
-      id: item.id,
-      filename: item.filename,
-      source: item.source,
-      originalSrc: item.originalSrc,
-      overlaySrc: item.overlaySrc,
-      verdict: item.verdict,
-      confidence: item.confidence,
-      defects: item.defects,
-      pipeline: item.pipeline,
-      createdAt: item.created_at,
-      metrics: item.metrics,
-    });
+    setDetail(itemToDetail(item));
   }
 
   const runAnalysis = useCallback(async (file: File | Blob, filename: string, source: "upload" | "camera") => {
@@ -141,23 +130,39 @@ export default function AppShell({
 
   async function reprocessItem(id: string) {
     setError(null);
-    const response = await fetch(`/api/analyses/${id}/reprocess`, { method: "POST" });
-    if (!response.ok) {
+    setActionId(id);
+    try {
+      const response = await fetch(`/api/analyses/${id}/reprocess`, { method: "POST" });
+      if (!response.ok) {
+        setError("Kayıt yeniden taranamadı.");
+        return;
+      }
+      const data = await response.json();
+      await reload();
+      if (data.item) setDetail(itemToDetail(data.item));
+    } catch {
       setError("Kayıt yeniden taranamadı.");
-      return;
+    } finally {
+      setActionId(null);
     }
-    await reload();
   }
 
   async function deleteItem(id: string) {
     setError(null);
-    const response = await fetch(`/api/analyses/${id}`, { method: "DELETE" });
-    if (!response.ok) {
+    setActionId(id);
+    try {
+      const response = await fetch(`/api/analyses/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        setError("Kayıt silinemedi.");
+        return;
+      }
+      setDetail(null);
+      await reload();
+    } catch {
       setError("Kayıt silinemedi.");
-      return;
+    } finally {
+      setActionId(null);
     }
-    setDetail(null);
-    await reload();
   }
 
   const visibleStored = filter ? stored.filter((item) => item.verdict === filter) : stored;
@@ -206,8 +211,8 @@ export default function AppShell({
           <div className="card p-2">
             <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)] flex-wrap gap-2">
               <div className="flex gap-2">
-                <button onClick={() => setMode("upload")} className={`btn text-sm py-2 px-4 ${mode === "upload" ? "btn-primary" : "btn-outline"}`}>📤 Görsel Yükle</button>
-                <button onClick={() => setMode("camera")} className={`btn text-sm py-2 px-4 ${mode === "camera" ? "btn-primary" : "btn-outline"}`}>📷 Canlı Kamera</button>
+                <button onClick={() => setMode("upload")} className={`btn text-sm py-2 px-4 ${mode === "upload" ? "btn-primary" : "btn-outline"}`}>Görsel Yükle</button>
+                <button onClick={() => setMode("camera")} className={`btn text-sm py-2 px-4 ${mode === "camera" ? "btn-primary" : "btn-outline"}`}>Canlı Kamera</button>
               </div>
               <div className="text-[11px] text-[var(--text-muted)]">{refLabel}</div>
             </div>
@@ -253,6 +258,9 @@ export default function AppShell({
                 key={card.id}
                 item={card}
                 onOpen={openDetail}
+                onReprocess={reprocessItem}
+                onDelete={deleteItem}
+                actionBusy={actionId === card.id}
               />
             ))}
           </div>
@@ -260,9 +268,31 @@ export default function AppShell({
       </section>
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <DetailModal item={detail} onClose={() => setDetail(null)} onReprocess={reprocessItem} onDelete={deleteItem} />
+      <DetailModal
+        item={detail}
+        onClose={() => setDetail(null)}
+        onReprocess={reprocessItem}
+        onDelete={deleteItem}
+        actionBusy={!!detail && actionId === detail.id}
+      />
     </div>
   );
+}
+
+function itemToDetail(item: StoredAnalysis): DetailItem {
+  return {
+    id: item.id,
+    filename: item.filename,
+    source: item.source,
+    originalSrc: item.originalSrc,
+    overlaySrc: item.overlaySrc,
+    verdict: item.verdict,
+    confidence: item.confidence,
+    defects: item.defects,
+    pipeline: item.pipeline,
+    createdAt: item.created_at,
+    metrics: item.metrics,
+  };
 }
 
 function Stat({ label, value, color }: { label: string; value: number; color: string }) {

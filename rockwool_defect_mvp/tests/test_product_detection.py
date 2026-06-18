@@ -42,6 +42,22 @@ class ProductDetectionTests(unittest.TestCase):
         self.assertLess(width, 560)
         self.assertGreater(width, height)
 
+    def test_bbox_snaps_to_outer_panel_edges(self) -> None:
+        image = np.full((420, 720, 3), 25, dtype=np.uint8)
+        cv2.rectangle(image, (100, 80), (620, 330), (88, 96, 74), -1)
+        cv2.rectangle(image, (128, 108), (592, 302), (120, 150, 105), -1)
+        cv2.rectangle(image, (100, 80), (620, 330), (180, 190, 160), 3)
+
+        product = find_product_roi(image, load_config())
+
+        self.assertIsNotNone(product)
+        assert product is not None
+        x, y, width, height = product.shape_bbox
+        self.assertLessEqual(abs(x - 100), 18)
+        self.assertLessEqual(abs(y - 80), 18)
+        self.assertGreaterEqual(width, 500)
+        self.assertGreaterEqual(height, 235)
+
     def test_tall_textured_panel_uses_full_height_frame(self) -> None:
         image_path = Path("data/raw/20260619_003206_116660_upload_defects_image8.jpeg")
         if not image_path.exists():

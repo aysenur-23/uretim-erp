@@ -44,11 +44,13 @@ export function DetailModal({
   onClose,
   onReprocess,
   onDelete,
+  actionBusy,
 }: {
   item: DetailItem | null;
   onClose: () => void;
   onReprocess?: (id: string) => void;
   onDelete?: (id: string) => void;
+  actionBusy?: boolean;
 }) {
   const [showOverlay, setShowOverlay] = useState(true);
   useEffect(() => {
@@ -168,12 +170,12 @@ export function DetailModal({
           {(onReprocess || onDelete) && (
             <div className="mt-2 flex gap-2">
               {onReprocess && (
-                <button onClick={() => onReprocess(item.id)} className="btn btn-outline text-xs flex-1 py-2">
-                  Tekrar tara
+                <button disabled={actionBusy} onClick={() => onReprocess(item.id)} className="btn btn-outline text-xs flex-1 py-2 disabled:opacity-50">
+                  {actionBusy ? "İşleniyor..." : "Tekrar tara"}
                 </button>
               )}
               {onDelete && (
-                <button onClick={() => onDelete(item.id)} className="btn btn-outline text-xs flex-1 py-2 text-[var(--mega-red)]">
+                <button disabled={actionBusy} onClick={() => onDelete(item.id)} className="btn btn-outline text-xs flex-1 py-2 text-[var(--mega-red)] disabled:opacity-50">
                   Sil
                 </button>
               )}
