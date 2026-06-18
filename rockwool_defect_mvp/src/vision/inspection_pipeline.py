@@ -131,9 +131,63 @@ def run_defect_rules(
     config: AppConfig,
 ) -> dict[str, dict]:
     local_anomaly = detect_local_anomaly(roi, config)
+    color_anomaly = detect_color_anomaly(frame, roi, config)
     glass_burn = detect_glass_burn(frame, roi, config)
     dark_crack = detect_dark_crack_like_regions(frame, roi, config)
     raw_fiber = detect_raw_fiber(frame, roi, config)
+    pale_surface_fiber_like = (
+        bool(glass_burn.get("is_suspicious", False))
+        and float(glass_burn.get("mean_mask_corrected_v", 255.0)) > 90.0
+        and float(color_anomaly.get("score", 0.0)) >= 0.30
+        and not bool(dark_crack.get("is_suspicious", False))
+    )
+    local_surface_fiber_like = (
+        bool(local_anomaly.get("is_suspicious", False))
+        and not bool(dark_crack.get("is_suspicious", False))
+        and not bool(glass_burn.get("is_suspicious", False))
+    )
+    broad_pale_surface_like = (
+        not bool(dark_crack.get("is_suspicious", False))
+        and not bool(glass_burn.get("is_suspicious", False))
+        and float(glass_burn.get("largest_component_ratio", 0.0)) >= 0.025
+        and float(glass_burn.get("mean_mask_corrected_v", 0.0)) >= 110.0
+        and float(glass_burn.get("mean_mask_sat", 255.0)) <= 75.0
+    )
+    if pale_surface_fiber_like or local_surface_fiber_like or broad_pale_surface_like:
+        raw_fiber = {
+            **raw_fiber,
+            "score": max(float(raw_fiber.get("score", 0.0)), 0.45 if not broad_pale_surface_like else 0.35),
+            "is_suspicious": True,
+            "message": "Acik/gri cig elyaf yuzey anomalisi supheli.",
+            "strategy": f"{raw_fiber.get('strategy', '')}; acik-gri yuzey anomalisi yeniden siniflandirma",
+            "mask": raw_fiber.get("mask") if raw_fiber.get("mask") is not None else glass_burn.get("mask"),
+            "pale_surface_reclassified": True,
+        }
+    if bool(dark_crack.get("is_suspicious", False)) and bool(glass_burn.get("is_suspicious", False)):
+        glass_burn = {
+            **glass_burn,
+            "score": min(float(glass_burn.get("score", 0.0)), 0.22),
+            "is_suspicious": False,
+            "message": "Koyu sinyal catlak olarak siniflandi; cam yanigi bastirildi.",
+            "suppressed_by_crack": True,
+        }
+    if bool(dark_crack.get("is_suspicious", False)):
+        if bool(raw_fiber.get("is_suspicious", False)) and float(raw_fiber.get("score", 0.0)) < 0.60:
+            raw_fiber = {
+                **raw_fiber,
+                "score": min(float(raw_fiber.get("score", 0.0)), 0.22),
+                "is_suspicious": False,
+                "message": "Acik lif sinyali catlak maskesi icinde yardimci sinyal olarak bastirildi.",
+                "suppressed_by_crack": True,
+            }
+        if bool(local_anomaly.get("is_suspicious", False)):
+            local_anomaly = {
+                **local_anomaly,
+                "score": min(float(local_anomaly.get("score", 0.0)), 0.24),
+                "is_suspicious": False,
+                "message": "Yerel anomali catlak olarak siniflandi.",
+                "suppressed_by_crack": True,
+            }
     if bool(dark_crack.get("raw_fiber_relief_like", False)):
         relief_score = min(1.0, max(float(dark_crack.get("score", 0.0)) * 0.88, 0.62))
         raw_fiber = {
@@ -152,10 +206,32 @@ def run_defect_rules(
             "message": "Cizgisel sinyal cig elyaf relief olarak siniflandi.",
             "suppressed_by_raw_fiber": True,
         }
+    if bool(raw_fiber.get("is_suspicious", False)) and not bool(dark_crack.get("is_suspicious", False)):
+        color_anomaly = {
+            **color_anomaly,
+            "score": min(float(color_anomaly.get("score", 0.0)), 0.22),
+            "is_suspicious": False,
+            "message": "Renk farki cig elyaf olarak siniflandi.",
+            "suppressed_by_raw_fiber": True,
+        }
+        glass_burn = {
+            **glass_burn,
+            "score": min(float(glass_burn.get("score", 0.0)), 0.22),
+            "is_suspicious": False,
+            "message": "Koyu/açik sinyal cig elyaf olarak siniflandi.",
+            "suppressed_by_raw_fiber": True,
+        }
+        local_anomaly = {
+            **local_anomaly,
+            "score": min(float(local_anomaly.get("score", 0.0)), 0.24),
+            "is_suspicious": False,
+            "message": "Yerel anomali cig elyaf olarak siniflandi.",
+            "suppressed_by_raw_fiber": True,
+        }
     return {
         "edge_damage": detect_edge_damage(frame, roi, bbox, config),
         "deformation": detect_shape_deformation(frame, roi, bbox, config),
-        "color_anomaly": detect_color_anomaly(frame, roi, config),
+        "color_anomaly": color_anomaly,
         "glass_burn": glass_burn,
         "raw_fiber": raw_fiber,
         "dark_crack": dark_crack,

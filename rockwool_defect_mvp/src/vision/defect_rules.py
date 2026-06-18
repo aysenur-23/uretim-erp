@@ -194,7 +194,7 @@ def detect_raw_fiber(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> R
 
     fiber_ratio = float(cv2.countNonZero(fiber_mask)) / float(max(1, valid_area))
     largest_ratio = _largest_component_area_ratio(fiber_mask, valid_area)
-    score = _clip01(max(fiber_ratio * 4.0, largest_ratio * 10.0))
+    score = _clip01(max(fiber_ratio * 3.2, largest_ratio * 8.0))
     is_suspicious = score >= 0.26
     return {
         **_result(
@@ -254,6 +254,7 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
 
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     valid_pixels = gray[valid_mask > 0]
+    valid_median_gray = float(np.median(valid_pixels))
     percentile_threshold = np.percentile(valid_pixels, max(1.0, config.crack_darkness_threshold * 45.0))
     median_threshold = float(np.median(valid_pixels)) - 25.0
     darkness_threshold = min(percentile_threshold, median_threshold)
@@ -288,6 +289,13 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
     crack_area = float(cv2.countNonZero(crack_mask))
     crack_area_ratio = (crack_area / valid_area) if valid_area else 0.0
     dense_texture = crack_stats["component_count"] >= 45
+    crack_pixels = crack_mask > 0
+    if np.any(crack_pixels):
+        crack_mean_gray = float(np.mean(gray[crack_pixels]))
+        crack_mean_sat = float(np.mean(cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 1][crack_pixels]))
+    else:
+        crack_mean_gray = 255.0
+        crack_mean_sat = 0.0
     texture_penalty = 0.22 if dense_texture else 1.0
     score = _clip01(
         max(
@@ -310,11 +318,25 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
         )
     )
     broad_stain_like = crack_area_ratio >= 0.08 and crack_stats["max_length_ratio"] < 0.22
-    raw_fiber_relief_like = (
+    strong_crack_geometry = (
+        (crack_stats["vertical_coverage"] >= 0.55 and crack_stats["max_length_ratio"] >= 0.32)
+        or (crack_stats["vertical_coverage"] >= 0.50 and crack_stats["component_count"] >= 4)
+    )
+    dark_valley = (valid_median_gray - crack_mean_gray) >= 8.0 or crack_mean_gray <= 100.0
+    light_low_sat_relief = (
+        crack_mean_gray >= 135.0
+        and crack_mean_sat <= 70.0
+        and crack_stats["component_count"] >= 3
+        and crack_area_ratio >= 0.007
+        and not strong_crack_geometry
+    )
+    rough_relief = (
         0.018 <= crack_area_ratio <= 0.040
         and crack_stats["max_length_ratio"] >= 0.28
         and crack_stats["component_count"] >= 4
+        and not dark_valley
     )
+    raw_fiber_relief_like = light_low_sat_relief or rough_relief
     is_suspicious = (
         not dense_texture
         and not broad_stain_like
@@ -345,6 +367,12 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
         "dense_texture": dense_texture,
         "broad_stain_like": broad_stain_like,
         "raw_fiber_relief_like": raw_fiber_relief_like,
+        "strong_crack_geometry": strong_crack_geometry,
+        "dark_valley": dark_valley,
+        "light_low_sat_relief": light_low_sat_relief,
+        "crack_mean_gray": round(crack_mean_gray, 4),
+        "crack_mean_sat": round(crack_mean_sat, 4),
+        "valid_median_gray": round(valid_median_gray, 4),
         "max_length_ratio": round(crack_stats["max_length_ratio"], 4),
         "vertical_coverage": round(crack_stats["vertical_coverage"], 4),
     }
