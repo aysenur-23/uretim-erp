@@ -84,6 +84,27 @@ class DefectRulesTests(unittest.TestCase):
         self.assertIsNotNone(burn["mask"])
         self.assertFalse(crack["is_suspicious"])
 
+    def test_glass_burn_ignores_bottom_lighting_shadow(self) -> None:
+        roi = np.full((320, 240, 3), (96, 132, 86), dtype=np.uint8)
+        gradient = np.linspace(1.12, 0.62, roi.shape[0], dtype=np.float32)[:, None, None]
+        shaded = np.clip(roi.astype(np.float32) * gradient, 0, 255).astype(np.uint8)
+
+        result = detect_glass_burn(shaded, shaded, load_config())
+
+        self.assertFalse(result["is_suspicious"])
+        self.assertIsNone(result["mask"])
+
+    def test_glass_burn_finds_local_stain_under_lighting_gradient(self) -> None:
+        roi = np.full((320, 240, 3), (96, 132, 86), dtype=np.uint8)
+        gradient = np.linspace(1.12, 0.68, roi.shape[0], dtype=np.float32)[:, None, None]
+        shaded = np.clip(roi.astype(np.float32) * gradient, 0, 255).astype(np.uint8)
+        cv2.circle(shaded, (128, 210), 34, (24, 34, 42), -1)
+
+        result = detect_glass_burn(shaded, shaded, load_config())
+
+        self.assertTrue(result["is_suspicious"])
+        self.assertIsNotNone(result["mask"])
+
     def test_raw_fiber_flags_light_desaturated_patch(self) -> None:
         roi = np.full((260, 420, 3), (120, 150, 105), dtype=np.uint8)
         cv2.rectangle(roi, (150, 80), (260, 170), (210, 220, 205), -1)

@@ -83,7 +83,7 @@ def detect_color_anomaly(image: np.ndarray, roi: np.ndarray, config: AppConfig) 
 
 
 def detect_glass_burn(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> RuleResult:
-    """Detect broad dark brown/black burn-like stain regions."""
+    """Detect local dark brown/black burn-like stain regions after illumination correction."""
     del image
     valid_mask = _valid_product_mask(roi)
     valid_area = cv2.countNonZero(valid_mask)
@@ -93,19 +93,26 @@ def detect_glass_burn(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    valid_gray = gray[valid_mask > 0]
-    valid_lab = lab[valid_mask > 0]
-
-    median_l = float(np.median(valid_lab[:, 0]))
-    dark_threshold = min(float(np.percentile(valid_gray, 18)), float(np.median(valid_gray) - 24.0))
-    local_baseline = cv2.GaussianBlur(gray, (45, 45), 0)
-    local_drop = cv2.subtract(local_baseline, gray)
-    local_values = local_drop[valid_mask > 0]
-    local_threshold = max(18.0, float(np.percentile(local_values, 88)))
-
     hue = hsv[:, :, 0]
     sat = hsv[:, :, 1]
     val = hsv[:, :, 2]
+    valid_lab = lab[valid_mask > 0]
+
+    median_l = float(np.median(valid_lab[:, 0]))
+    local_baseline = _illumination_baseline(gray, valid_mask)
+    local_drop = np.clip(local_baseline.astype(np.float32) - gray.astype(np.float32), 0, 255).astype(np.uint8)
+    local_values = local_drop[valid_mask > 0]
+    local_threshold = max(10.0, float(np.percentile(local_values, 88)))
+    corrected_v = np.clip(
+        val.astype(np.float32) + (np.median(local_baseline[valid_mask > 0]) - local_baseline.astype(np.float32)),
+        0,
+        255,
+    ).astype(np.uint8)
+    corrected_values = corrected_v[valid_mask > 0]
+    corrected_dark_threshold = min(
+        float(np.percentile(corrected_values, 28)),
+        float(np.median(corrected_values) - 8.0),
+    )
     brown_or_black = (
         (((hue <= 34) | (hue >= 165)) & (sat >= 35))
         | ((lab[:, :, 0].astype(np.float32) <= median_l - 18.0) & (sat >= 20))
@@ -113,7 +120,10 @@ def detect_glass_burn(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> 
     burn_mask = np.where(
         (valid_mask > 0)
         & brown_or_black
-        & ((gray <= dark_threshold) | (local_drop >= local_threshold) | (val <= np.percentile(val[valid_mask > 0], 20))),
+        & (
+            ((local_drop >= local_threshold) & (corrected_v <= corrected_dark_threshold))
+            | ((lab[:, :, 0].astype(np.float32) <= median_l - 22.0) & (local_drop >= 8))
+        ),
         255,
         0,
     ).astype(np.uint8)
@@ -122,7 +132,9 @@ def detect_glass_burn(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> 
     burn_ratio = float(cv2.countNonZero(burn_mask)) / float(max(1, valid_area))
     largest_ratio = _largest_component_area_ratio(burn_mask, valid_area)
     score = _clip01(max(burn_ratio * 5.0, largest_ratio * 12.0))
-    is_suspicious = score >= max(0.22, config.color_anomaly_threshold * 0.75)
+    is_suspicious = score >= max(0.16, config.color_anomaly_threshold * 0.50)
+    if is_suspicious:
+        score = max(score, 0.72)
 
     return {
         **_result(
@@ -134,6 +146,8 @@ def detect_glass_burn(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> 
         "mask": burn_mask if cv2.countNonZero(burn_mask) > 0 else None,
         "burn_ratio": round(burn_ratio, 4),
         "largest_component_ratio": round(largest_ratio, 4),
+        "local_threshold": round(local_threshold, 4),
+        "corrected_dark_threshold": round(corrected_dark_threshold, 4),
     }
 
 
@@ -370,6 +384,22 @@ def _filter_blob_components(
             continue
         output[labels == label] = 255
     return output
+
+
+def _illumination_baseline(gray: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
+    """Estimate slow lighting/shadow variation without treating it as a defect."""
+    height, width = gray.shape[:2]
+    kernel_size = max(41, int(max(height, width) * 0.28) | 1)
+    gray_float = gray.astype(np.float32)
+    mask_float = (valid_mask > 0).astype(np.float32)
+    weighted = cv2.GaussianBlur(gray_float * mask_float, (kernel_size, kernel_size), 0)
+    weights = cv2.GaussianBlur(mask_float, (kernel_size, kernel_size), 0)
+    baseline = weighted / np.maximum(weights, 1e-3)
+
+    valid_values = gray[valid_mask > 0]
+    fill_value = float(np.median(valid_values)) if valid_values.size else float(np.median(gray))
+    baseline[weights < 1e-3] = fill_value
+    return np.clip(baseline, 0, 255).astype(np.uint8)
 
 
 def _result(score: float, is_suspicious: bool, message: str) -> RuleResult:
