@@ -49,6 +49,18 @@ class DefectRulesTests(unittest.TestCase):
         self.assertGreaterEqual(result["score"], 0.30)
         self.assertGreaterEqual(result["vertical_coverage"], 0.25)
 
+    def test_crack_overlay_adds_nearby_faint_line_components(self) -> None:
+        roi = np.full((360, 260, 3), (96, 132, 86), dtype=np.uint8)
+        cv2.line(roi, (82, 35), (92, 330), (32, 48, 30), 3)
+        for y in range(58, 305, 20):
+            cv2.line(roi, (158, y), (164, y + 12), (64, 82, 54), 2)
+
+        result = detect_dark_crack_like_regions(roi, roi, load_config())
+
+        self.assertTrue(result["is_suspicious"])
+        self.assertGreater(result["display_crack_area_ratio"], result["crack_area_ratio"])
+        self.assertLess(result["display_crack_area_ratio"] - result["crack_area_ratio"], 0.01)
+
     def test_regular_dense_fiber_texture_is_not_crack(self) -> None:
         roi = np.full((360, 520, 3), (150, 168, 135), dtype=np.uint8)
         for x in range(18, 500, 9):

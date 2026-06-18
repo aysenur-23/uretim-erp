@@ -282,6 +282,15 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
     blackhat_mask = np.where((blackhat >= blackhat_threshold) & (valid_mask > 0), 255, 0).astype(np.uint8)
 
     column_shadow_mask = _vertical_shadow_mask(gray, valid_mask)
+    weak_crack_mask = _weak_crack_candidate_mask(
+        gray,
+        valid_mask,
+        local_dark,
+        local_values,
+        blackhat,
+        blackhat_values,
+        valid_pixels,
+    )
 
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     dark_mask = cv2.bitwise_or(absolute_dark_mask, local_dark_mask)
@@ -289,13 +298,19 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
     dark_mask = cv2.bitwise_or(dark_mask, column_shadow_mask)
     dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel, iterations=1)
     dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_CLOSE, vertical_kernel, iterations=1)
-    crack_mask, crack_stats = _filter_crack_components(dark_mask)
+    seed_crack_mask, crack_stats = _filter_crack_components(dark_mask)
+    display_crack_mask = seed_crack_mask
+    if cv2.countNonZero(seed_crack_mask) > 0:
+        fine_crack_mask = _secondary_crack_component_mask(weak_crack_mask, seed_crack_mask, valid_mask)
+        display_crack_mask = cv2.bitwise_or(seed_crack_mask, fine_crack_mask)
 
     valid_area = float(cv2.countNonZero(valid_mask))
-    crack_area = float(cv2.countNonZero(crack_mask))
+    crack_area = float(cv2.countNonZero(seed_crack_mask))
+    display_crack_area = float(cv2.countNonZero(display_crack_mask))
     crack_area_ratio = (crack_area / valid_area) if valid_area else 0.0
+    display_crack_area_ratio = (display_crack_area / valid_area) if valid_area else 0.0
     dense_texture = crack_stats["component_count"] >= 45
-    crack_pixels = crack_mask > 0
+    crack_pixels = seed_crack_mask > 0
     if np.any(crack_pixels):
         crack_mean_gray = float(np.mean(gray[crack_pixels]))
         crack_mean_sat = float(np.mean(cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 1][crack_pixels]))
@@ -367,9 +382,10 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
             "Koyu ince cizgisel bolgeler supheli." if is_suspicious else "Catlak sinyali normal.",
         ),
         "strategy": "Dikey black-hat, lokal karanlik vadi ve ince uzun bilesen filtresi",
-        "mask": crack_mask if crack_area > 0 else None,
+        "mask": display_crack_mask if display_crack_area > 0 else None,
         "component_count": crack_stats["component_count"],
         "crack_area_ratio": round(crack_area_ratio, 4),
+        "display_crack_area_ratio": round(display_crack_area_ratio, 4),
         "dense_texture": dense_texture,
         "broad_stain_like": broad_stain_like,
         "raw_fiber_relief_like": raw_fiber_relief_like,
@@ -406,6 +422,96 @@ def _vertical_shadow_mask(gray: np.ndarray, valid_mask: np.ndarray) -> np.ndarra
         iterations=1,
     )
     return mask
+
+
+def _weak_crack_candidate_mask(
+    gray: np.ndarray,
+    valid_mask: np.ndarray,
+    local_dark: np.ndarray,
+    local_values: np.ndarray,
+    blackhat: np.ndarray,
+    blackhat_values: np.ndarray,
+    valid_pixels: np.ndarray,
+) -> np.ndarray:
+    if local_values.size == 0 or blackhat_values.size == 0 or valid_pixels.size == 0:
+        return np.zeros_like(gray, dtype=np.uint8)
+
+    weak_local_threshold = max(7.0, float(np.percentile(local_values, 84)))
+    weak_blackhat_threshold = max(6.0, float(np.percentile(blackhat_values, 88)))
+    weak_absolute_threshold = min(float(np.percentile(valid_pixels, 24)), float(np.median(valid_pixels) - 12.0))
+    weak_mask = np.where(
+        (valid_mask > 0)
+        & (
+            (local_dark >= weak_local_threshold)
+            | (blackhat >= weak_blackhat_threshold)
+            | (gray <= weak_absolute_threshold)
+        ),
+        255,
+        0,
+    ).astype(np.uint8)
+    weak_mask = cv2.morphologyEx(
+        weak_mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 17)),
+        iterations=1,
+    )
+    return weak_mask
+
+
+def _secondary_crack_component_mask(
+    candidate_mask: np.ndarray,
+    seed_mask: np.ndarray,
+    valid_mask: np.ndarray,
+) -> np.ndarray:
+    candidates = cv2.bitwise_and(candidate_mask, valid_mask)
+    if cv2.countNonZero(seed_mask) == 0 or cv2.countNonZero(candidates) == 0:
+        return np.zeros_like(candidate_mask, dtype=np.uint8)
+
+    candidates = cv2.morphologyEx(
+        candidates,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)),
+        iterations=1,
+    )
+    candidates = cv2.morphologyEx(
+        candidates,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (2, 9)),
+        iterations=1,
+    )
+
+    output = np.zeros_like(candidate_mask)
+    seed_reach = cv2.dilate(seed_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (41, 41)), iterations=1)
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(candidates, connectivity=8)
+    image_height = max(1, candidate_mask.shape[0])
+    image_width = max(1, candidate_mask.shape[1])
+    min_dimension = max(1, min(image_height, image_width))
+
+    for label in range(1, component_count):
+        x, y, width, height, area = stats[label]
+        if area < 8:
+            continue
+        long_side = max(width, height)
+        short_side = max(1, min(width, height))
+        aspect_ratio = long_side / float(short_side)
+        fill_ratio = area / float(max(1, width * height))
+        thickness_ratio = short_side / float(min_dimension)
+        length_ratio = long_side / float(image_height)
+        near_seed = np.any(seed_reach[labels == label] > 0)
+        verticalish = height >= width * 1.7
+        diagonal_or_vertical = height >= 18 and width <= max(18, int(image_width * 0.09))
+        if not near_seed:
+            continue
+        if aspect_ratio < 2.4 and not diagonal_or_vertical:
+            continue
+        if not verticalish and aspect_ratio < 3.6:
+            continue
+        if fill_ratio > 0.55 and thickness_ratio > 0.045:
+            continue
+        if length_ratio < 0.035:
+            continue
+        output[labels == label] = 255
+    return output
 
 
 def _filter_color_components(mask: np.ndarray, valid_area: int) -> np.ndarray:
