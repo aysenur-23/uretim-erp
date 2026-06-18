@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 
 from src.config import AppConfig, ensure_runtime_directories, load_config
 from src.storage.sqlite_store import SQLiteStore
+from src.vision.defect_taxonomy import PIPELINE_STEPS, ordered_defects
 from src.vision.inspection_pipeline import AnalysisView, process_frame, product_display_bbox
 from src.vision.preprocessing import resize_image
 
@@ -111,6 +112,25 @@ def reference() -> dict[str, Any]:
             "meanS": float(mean_hsv[1] / 255 * 100),
             "meanV": float(mean_hsv[2] / 255 * 100),
         }
+    }
+
+
+@app.get("/api/defect-types")
+def defect_types() -> dict[str, Any]:
+    return {
+        "pipeline": PIPELINE_STEPS,
+        "items": [
+            {
+                "type": meta.defect_type,
+                "label": meta.label,
+                "category": meta.category,
+                "overlayColor": meta.overlay_color,
+                "strategy": meta.strategy,
+                "description": meta.description,
+                "decisionImpact": meta.decision_impact,
+            }
+            for meta in ordered_defects()
+        ],
     }
 
 
@@ -264,6 +284,7 @@ def _record_to_item(record: dict[str, Any] | None) -> dict[str, Any]:
         "verdict": verdict,
         "confidence": confidence,
         "defects": _defects_from_record(record),
+        "pipeline": PIPELINE_STEPS,
         "metrics": _metrics_from_record(record),
         "originalSrc": f"/api/images/{record_id}?v=raw",
         "overlaySrc": f"/api/images/{record_id}?v=overlay",
@@ -276,29 +297,25 @@ def _defects_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     if record.get("model_result") == "SAGLAM":
         return []
 
-    specs = [
-        ("edge_damage_score", "edge_damage", "Kenar"),
-        ("deformation_score", "deformation", "Deformasyon"),
-        ("glass_burn_score", "glass_burn", "Cam yanığı"),
-        ("raw_fiber_score", "raw_fiber", "Çiğ elyaf"),
-        ("color_anomaly_score", "color_anomaly", "Renk/Leke"),
-        ("crack_score", "dark_crack", "Çatlak"),
-        ("local_anomaly_score", "local_anomaly", "Yerel anomali"),
-    ]
-    defects = []
-    for key, defect_type, label in specs:
-        score = float(record.get(key) or 0.0)
+    taxonomy_defects = []
+    for meta in ordered_defects():
+        score = float(record.get(meta.score_key) or 0.0)
         if score < 0.25:
             continue
-        defects.append(
+        taxonomy_defects.append(
             {
-                "type": defect_type,
-                "label": label,
+                "type": meta.defect_type,
+                "label": meta.label,
                 "score": round(score * 100),
                 "severity": _severity(score),
+                "category": meta.category,
+                "overlayColor": meta.overlay_color,
+                "strategy": meta.strategy,
+                "description": meta.description,
+                "decisionImpact": meta.decision_impact,
             }
         )
-    return defects
+    return taxonomy_defects
 
 
 def _metrics_from_record(record: dict[str, Any]) -> dict[str, float]:

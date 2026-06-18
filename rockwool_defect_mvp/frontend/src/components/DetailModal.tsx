@@ -2,6 +2,24 @@
 import { useEffect, useState } from "react";
 import { VerdictBadge, type Verdict } from "./VerdictBadge";
 
+export type DefectDetail = {
+  type: string;
+  label: string;
+  score: number;
+  severity: string;
+  category?: string;
+  overlayColor?: string;
+  strategy?: string;
+  description?: string;
+  decisionImpact?: string;
+};
+
+export type PipelineStep = {
+  key: string;
+  label: string;
+  description: string;
+};
+
 export type DetailItem = {
   id: string;
   filename: string;
@@ -10,7 +28,8 @@ export type DetailItem = {
   overlaySrc: string;
   verdict: Verdict;
   confidence: number;
-  defects: { type: string; label: string; score: number; severity: string }[];
+  defects: DefectDetail[];
+  pipeline?: PipelineStep[];
   createdAt?: number;
   metrics?: {
     meanH: number; meanS: number; meanV: number;
@@ -90,14 +109,41 @@ export function DetailModal({
             ) : (
               <ul className="space-y-2">
                 {item.defects.map((d) => (
-                  <li key={d.label} className="flex items-center justify-between gap-2">
-                    <span className="text-sm">{d.label}</span>
-                    <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${sev(d.severity)}`}>%{d.score}</span>
+                  <li key={d.type} className="rounded-lg border border-[var(--border)] p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-sm font-semibold">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.overlayColor ?? "#64748b" }} />
+                        {d.label}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${sev(d.severity)}`}>%{d.score}</span>
+                    </div>
+                    {d.category && <div className="mt-1 text-[11px] uppercase tracking-wider text-[var(--text-muted)]">{d.category}</div>}
+                    {d.description && <p className="mt-2 text-xs text-[var(--text-muted)]">{d.description}</p>}
+                    {d.strategy && (
+                      <p className="mt-2 text-xs text-[var(--text)]">
+                        <span className="font-semibold">Strateji:</span> {d.strategy}
+                      </p>
+                    )}
+                    {d.decisionImpact && <p className="mt-1 text-[11px] text-[var(--text-muted)]">{d.decisionImpact}</p>}
                   </li>
                 ))}
               </ul>
             )}
           </div>
+
+          {item.pipeline && item.pipeline.length > 0 && (
+            <div className="mt-5">
+              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Analiz hattı</h3>
+              <ol className="space-y-2">
+                {item.pipeline.map((step) => (
+                  <li key={step.key} className="rounded-lg bg-slate-50 px-3 py-2">
+                    <div className="text-xs font-semibold text-[var(--text)]">{step.label}</div>
+                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">{step.description}</div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
 
           {m && (
             <div className="mt-5">

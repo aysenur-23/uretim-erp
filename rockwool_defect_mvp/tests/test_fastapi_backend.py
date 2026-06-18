@@ -44,6 +44,13 @@ class FastApiBackendTests(unittest.TestCase):
             os.environ["MEGA_CONFIG_PATH"] = str(config_path)
             try:
                 with TestClient(app) as client:
+                    defect_types_response = client.get("/api/defect-types")
+                    self.assertEqual(defect_types_response.status_code, 200)
+                    defect_types = defect_types_response.json()
+                    self.assertIn("pipeline", defect_types)
+                    self.assertIn("items", defect_types)
+                    self.assertIn("glass_burn", {item["type"] for item in defect_types["items"]})
+
                     image_bytes = _synthetic_panel_jpeg()
 
                     response = client.post(
@@ -55,6 +62,7 @@ class FastApiBackendTests(unittest.TestCase):
                     record_id = item["id"]
                     self.assertEqual(item["source"], "upload")
                     self.assertIn(item["verdict"], {"KABUL", "RED", "UYARI"})
+                    self.assertGreaterEqual(len(item["pipeline"]), 5)
 
                     list_response = client.get("/api/analyses")
                     self.assertEqual(list_response.status_code, 200)

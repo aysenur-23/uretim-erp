@@ -5,7 +5,7 @@ import { UploadZone } from "@/components/UploadZone";
 import { CameraPanel } from "@/components/CameraPanel";
 import { ResultCard, type CardItem } from "@/components/ResultCard";
 import { SettingsModal } from "@/components/SettingsModal";
-import { DetailModal, type DetailItem } from "@/components/DetailModal";
+import { DetailModal, type DefectDetail, type DetailItem, type PipelineStep } from "@/components/DetailModal";
 
 export type StoredAnalysis = {
   id: string;
@@ -17,7 +17,8 @@ export type StoredAnalysis = {
   previousOverlaySrc?: string | null;
   verdict: "KABUL" | "RED" | "UYARI";
   confidence: number;
-  defects: { type: string; label: string; score: number; severity: "low" | "medium" | "high" }[];
+  defects: DefectDetail[];
+  pipeline?: PipelineStep[];
   metrics?: DetailItem["metrics"];
   meta?: string;
 };
@@ -90,6 +91,7 @@ export default function AppShell({
       verdict: item.verdict,
       confidence: item.confidence,
       defects: item.defects,
+      pipeline: item.pipeline,
       createdAt: item.created_at,
       metrics: item.metrics,
     });
