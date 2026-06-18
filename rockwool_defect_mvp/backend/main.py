@@ -155,7 +155,10 @@ def reprocess(record_id: int) -> dict[str, Any]:
         decision_label,
         anomaly_score,
         _rule_score(analysis, "edge_damage"),
+        _rule_score(analysis, "deformation"),
         _rule_score(analysis, "color_anomaly"),
+        _rule_score(analysis, "glass_burn"),
+        _rule_score(analysis, "raw_fiber"),
         _rule_score(analysis, "dark_crack"),
         _rule_score(analysis, "local_anomaly"),
         previous_overlay_path=previous_overlay_path,
@@ -229,7 +232,10 @@ def _save_analysis_record(
         "model_result": decision_label,
         "anomaly_score": anomaly_score,
         "edge_damage_score": _rule_score(analysis, "edge_damage"),
+        "deformation_score": _rule_score(analysis, "deformation"),
         "color_anomaly_score": _rule_score(analysis, "color_anomaly"),
+        "glass_burn_score": _rule_score(analysis, "glass_burn"),
+        "raw_fiber_score": _rule_score(analysis, "raw_fiber"),
         "crack_score": _rule_score(analysis, "dark_crack"),
         "local_anomaly_score": _rule_score(analysis, "local_anomaly"),
         "operator_label": _default_operator_label(decision_label),
@@ -272,6 +278,9 @@ def _defects_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
 
     specs = [
         ("edge_damage_score", "edge_damage", "Kenar"),
+        ("deformation_score", "deformation", "Deformasyon"),
+        ("glass_burn_score", "glass_burn", "Cam yanığı"),
+        ("raw_fiber_score", "raw_fiber", "Çiğ elyaf"),
         ("color_anomaly_score", "color_anomaly", "Renk/Leke"),
         ("crack_score", "dark_crack", "Çatlak"),
         ("local_anomaly_score", "local_anomaly", "Yerel anomali"),
@@ -298,9 +307,9 @@ def _metrics_from_record(record: dict[str, Any]) -> dict[str, float]:
         "meanS": 0.0,
         "meanV": 0.0,
         "brightSpotRatio": float(record.get("color_anomaly_score") or 0.0),
-        "darkSpotRatio": float(record.get("local_anomaly_score") or 0.0),
+        "darkSpotRatio": float(record.get("glass_burn_score") or record.get("local_anomaly_score") or 0.0),
         "longLineScore": float(record.get("crack_score") or 0.0),
-        "rectangularity": max(0.0, 1.0 - float(record.get("edge_damage_score") or 0.0)),
+        "rectangularity": max(0.0, 1.0 - float(record.get("deformation_score") or record.get("edge_damage_score") or 0.0)),
         "squarenessDeg": float(record.get("edge_damage_score") or 0.0) * 10,
     }
 

@@ -6,7 +6,12 @@ import cv2
 import numpy as np
 
 from src.config import load_config
-from src.vision.defect_rules import detect_color_anomaly, detect_dark_crack_like_regions
+from src.vision.defect_rules import (
+    detect_color_anomaly,
+    detect_dark_crack_like_regions,
+    detect_glass_burn,
+    detect_raw_fiber,
+)
 
 
 class DefectRulesTests(unittest.TestCase):
@@ -66,6 +71,27 @@ class DefectRulesTests(unittest.TestCase):
         self.assertIsNotNone(result["mask"])
         self.assertGreater(result["largest_component_ratio"], 0.01)
         self.assertIn("Lab", result["strategy"])
+
+    def test_glass_burn_flags_broad_dark_stain_without_crack(self) -> None:
+        roi = np.full((320, 240, 3), (96, 132, 86), dtype=np.uint8)
+        cv2.rectangle(roi, (70, 70), (160, 230), (22, 36, 45), -1)
+
+        burn = detect_glass_burn(roi, roi, load_config())
+        crack = detect_dark_crack_like_regions(roi, roi, load_config())
+
+        self.assertTrue(burn["is_suspicious"])
+        self.assertGreaterEqual(burn["score"], 0.7)
+        self.assertIsNotNone(burn["mask"])
+        self.assertFalse(crack["is_suspicious"])
+
+    def test_raw_fiber_flags_light_desaturated_patch(self) -> None:
+        roi = np.full((260, 420, 3), (120, 150, 105), dtype=np.uint8)
+        cv2.rectangle(roi, (150, 80), (260, 170), (210, 220, 205), -1)
+
+        result = detect_raw_fiber(roi, roi, load_config())
+
+        self.assertTrue(result["is_suspicious"])
+        self.assertIsNotNone(result["mask"])
 
     def test_color_strategy_keeps_uniform_panel_normal(self) -> None:
         roi = np.full((260, 420, 3), (120, 150, 105), dtype=np.uint8)

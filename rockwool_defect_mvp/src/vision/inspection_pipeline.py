@@ -12,6 +12,9 @@ from src.vision.defect_rules import (
     detect_color_anomaly,
     detect_dark_crack_like_regions,
     detect_edge_damage,
+    detect_glass_burn,
+    detect_raw_fiber,
+    detect_shape_deformation,
 )
 from src.vision.preprocessing import resize_image
 from src.vision.product_detection import ProductROI, find_product_roi
@@ -78,6 +81,29 @@ def draw_crack_mask_on_image(
     return result
 
 
+def draw_rule_mask_on_image(
+    image: np.ndarray,
+    bbox: tuple[int, int, int, int],
+    mask: np.ndarray | None,
+    color: tuple[int, int, int],
+    alpha: float = 0.30,
+) -> np.ndarray:
+    if mask is None:
+        return image
+
+    x, y, width, height = bbox
+    result = image.copy()
+    crop = result[y : y + height, x : x + width]
+    if crop.shape[:2] != mask.shape[:2]:
+        mask = cv2.resize(mask, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+    color_overlay = np.zeros_like(crop)
+    color_overlay[:, :] = color
+    blended = cv2.addWeighted(crop, 1.0 - alpha, color_overlay, alpha, 0)
+    crop[mask > 0] = blended[mask > 0]
+    return result
+
+
 def draw_heatmap_on_image(
     image: np.ndarray,
     bbox: tuple[int, int, int, int],
@@ -105,10 +131,15 @@ def run_defect_rules(
     config: AppConfig,
 ) -> dict[str, dict]:
     local_anomaly = detect_local_anomaly(roi, config)
+    glass_burn = detect_glass_burn(frame, roi, config)
+    dark_crack = detect_dark_crack_like_regions(frame, roi, config)
     return {
         "edge_damage": detect_edge_damage(frame, roi, bbox, config),
+        "deformation": detect_shape_deformation(frame, roi, bbox, config),
         "color_anomaly": detect_color_anomaly(frame, roi, config),
-        "dark_crack": detect_dark_crack_like_regions(frame, roi, config),
+        "glass_burn": glass_burn,
+        "raw_fiber": detect_raw_fiber(frame, roi, config),
+        "dark_crack": dark_crack,
         "local_anomaly": local_anomaly,
     }
 
@@ -136,10 +167,14 @@ def process_frame(frame: np.ndarray, config: AppConfig) -> AnalysisView:
     rule_results = run_defect_rules(display_frame, roi, bbox, config)
     decision = decide_quality(rule_results, config)
     crack_mask = rule_results["dark_crack"].get("mask")
+    burn_mask = rule_results["glass_burn"].get("mask")
+    raw_fiber_mask = rule_results["raw_fiber"].get("mask")
     heatmap = rule_results["local_anomaly"].get("heatmap")
 
     overlay = draw_shape_analysis(display_frame, product.contour, product.rotated_box)
     overlay = draw_heatmap_on_image(overlay, bbox, heatmap)
+    overlay = draw_rule_mask_on_image(overlay, bbox, burn_mask, (0, 95, 255), alpha=0.38)
+    overlay = draw_rule_mask_on_image(overlay, bbox, raw_fiber_mask, (255, 210, 40), alpha=0.34)
     overlay = draw_crack_mask_on_image(overlay, bbox, crack_mask)
     return AnalysisView(
         original=display_frame,

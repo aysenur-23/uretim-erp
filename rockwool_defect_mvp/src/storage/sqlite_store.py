@@ -14,7 +14,10 @@ INSPECTION_COLUMNS = [
     "model_result",
     "anomaly_score",
     "edge_damage_score",
+    "deformation_score",
     "color_anomaly_score",
+    "glass_burn_score",
+    "raw_fiber_score",
     "crack_score",
     "local_anomaly_score",
     "operator_label",
@@ -50,7 +53,10 @@ class SQLiteStore:
                         model_result TEXT,
                         anomaly_score REAL,
                         edge_damage_score REAL,
+                        deformation_score REAL,
                         color_anomaly_score REAL,
+                        glass_burn_score REAL,
+                        raw_fiber_score REAL,
                         crack_score REAL,
                         local_anomaly_score REAL,
                         operator_label TEXT,
@@ -65,6 +71,9 @@ class SQLiteStore:
                     """
                 )
                 self._ensure_column(connection, "local_anomaly_score", "REAL")
+                self._ensure_column(connection, "deformation_score", "REAL")
+                self._ensure_column(connection, "glass_burn_score", "REAL")
+                self._ensure_column(connection, "raw_fiber_score", "REAL")
                 self._ensure_column(connection, "is_model_wrong", "INTEGER NOT NULL DEFAULT 0")
                 self._ensure_column(connection, "previous_overlay_path", "TEXT")
                 self._ensure_column(connection, "previous_model_result", "TEXT")
@@ -115,7 +124,10 @@ class SQLiteStore:
                     model_result,
                     anomaly_score,
                     edge_damage_score,
+                    deformation_score,
                     color_anomaly_score,
+                    glass_burn_score,
+                    raw_fiber_score,
                     crack_score,
                     local_anomaly_score,
                     operator_label,
@@ -149,7 +161,10 @@ class SQLiteStore:
                     model_result,
                     anomaly_score,
                     edge_damage_score,
+                    deformation_score,
                     color_anomaly_score,
+                    glass_burn_score,
+                    raw_fiber_score,
                     crack_score,
                     local_anomaly_score,
                     operator_label,
@@ -209,7 +224,10 @@ class SQLiteStore:
         model_result: str,
         anomaly_score: float,
         edge_damage_score: float,
+        deformation_score: float,
         color_anomaly_score: float,
+        glass_burn_score: float,
+        raw_fiber_score: float,
         crack_score: float,
         local_anomaly_score: float,
         previous_overlay_path: str | None = None,
@@ -226,7 +244,10 @@ class SQLiteStore:
                         model_result = ?,
                         anomaly_score = ?,
                         edge_damage_score = ?,
+                        deformation_score = ?,
                         color_anomaly_score = ?,
+                        glass_burn_score = ?,
+                        raw_fiber_score = ?,
                         crack_score = ?,
                         local_anomaly_score = ?,
                         previous_overlay_path = ?,
@@ -239,7 +260,10 @@ class SQLiteStore:
                         model_result,
                         anomaly_score,
                         edge_damage_score,
+                        deformation_score,
                         color_anomaly_score,
+                        glass_burn_score,
+                        raw_fiber_score,
                         crack_score,
                         local_anomaly_score,
                         previous_overlay_path,
@@ -260,7 +284,10 @@ class SQLiteStore:
                     COUNT(*) AS total_count,
                     AVG(anomaly_score) AS avg_anomaly_score,
                     AVG(edge_damage_score) AS avg_edge_damage_score,
+                    AVG(deformation_score) AS avg_deformation_score,
                     AVG(color_anomaly_score) AS avg_color_anomaly_score,
+                    AVG(glass_burn_score) AS avg_glass_burn_score,
+                    AVG(raw_fiber_score) AS avg_raw_fiber_score,
                     AVG(crack_score) AS avg_crack_score,
                     AVG(local_anomaly_score) AS avg_local_anomaly_score,
                     SUM(is_model_wrong) AS wrong_count

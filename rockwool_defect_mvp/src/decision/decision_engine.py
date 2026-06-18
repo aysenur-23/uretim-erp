@@ -49,7 +49,10 @@ def decide_quality(rule_results: dict[str, dict[str, Any]], config: AppConfig) -
 def _rule_display_name(name: str) -> str:
     return {
         "edge_damage": "Kenar",
+        "deformation": "Deformasyon",
         "color_anomaly": "Renk",
+        "glass_burn": "Cam yanigi",
+        "raw_fiber": "Cig elyaf",
         "dark_crack": "Catlak",
         "local_anomaly": "Yerel anomali",
     }.get(name, name)
