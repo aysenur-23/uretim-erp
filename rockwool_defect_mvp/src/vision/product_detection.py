@@ -321,8 +321,8 @@ def _snap_shape_mask_to_panel_edges(image: np.ndarray, shape_mask: np.ndarray) -
     edge_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     edges = cv2.dilate(edges, edge_kernel, iterations=1)
 
-    x_pad = max(10, int(width * 0.06))
-    y_pad = max(10, int(height * 0.06))
+    x_pad = max(10, int(width * 0.18))
+    y_pad = max(10, int(height * 0.18))
     left = _snap_side_from_profile(edges.mean(axis=0), x, x_pad, image_width, prefer="left")
     right = _snap_side_from_profile(edges.mean(axis=0), x + width - 1, x_pad, image_width, prefer="right")
     top = _snap_side_from_profile(edges.mean(axis=1), y, y_pad, image_height, prefer="left")
@@ -339,7 +339,7 @@ def _snap_shape_mask_to_panel_edges(image: np.ndarray, shape_mask: np.ndarray) -
 
     old_area = float(width * height)
     new_area = float(new_width * new_height)
-    if new_area > old_area * 1.18 or new_area < old_area * 0.98:
+    if new_area > old_area * 1.28 or new_area < old_area * 0.98:
         return shape_mask
 
     movement = abs(nx1 - x) + abs(ny1 - y) + abs(nx2 - (x + width - 1)) + abs(ny2 - (y + height - 1))
@@ -369,11 +369,12 @@ def _snap_side_from_profile(
         return None
 
     local_max = float(window.max())
-    background = float(np.percentile(profile.astype(np.float32), 72))
-    if local_max < max(8.0, background * 1.25):
+    local_median = float(np.median(window))
+    local_prominence = local_max - local_median
+    if local_max < 24.0 or local_prominence < 18.0:
         return None
 
-    threshold = local_max * 0.82
+    threshold = local_median + local_prominence * 0.72
     candidates = np.where(window >= threshold)[0]
     if candidates.size == 0:
         return None

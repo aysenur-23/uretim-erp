@@ -275,7 +275,8 @@ def process_frame(frame: np.ndarray, config: AppConfig) -> AnalysisView:
     crack_mask = rule_results["dark_crack"].get("mask") if rule_results["dark_crack"].get("is_suspicious") else None
     burn_mask = rule_results["glass_burn"].get("mask") if rule_results["glass_burn"].get("is_suspicious") else None
     raw_fiber_mask = rule_results["raw_fiber"].get("mask") if rule_results["raw_fiber"].get("is_suspicious") else None
-    heatmap = rule_results["local_anomaly"].get("heatmap")
+    has_specific_overlay = any(mask is not None for mask in (crack_mask, burn_mask, raw_fiber_mask))
+    heatmap = None if has_specific_overlay else rule_results["local_anomaly"].get("heatmap")
 
     overlay = draw_shape_analysis(display_frame, product.contour, product.rotated_box)
     overlay = draw_heatmap_on_image(overlay, bbox, heatmap)
