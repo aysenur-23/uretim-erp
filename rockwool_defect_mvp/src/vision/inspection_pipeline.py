@@ -153,13 +153,24 @@ def run_defect_rules(
         and float(glass_burn.get("mean_mask_corrected_v", 0.0)) >= 110.0
         and float(glass_burn.get("mean_mask_sat", 255.0)) <= 75.0
     )
-    if pale_surface_fiber_like or local_surface_fiber_like or broad_pale_surface_like:
+    texture_spread_fiber_like = (
+        bool(color_anomaly.get("is_suspicious", False))
+        and not bool(dark_crack.get("is_suspicious", False))
+        and not bool(glass_burn.get("is_suspicious", False))
+        and float(color_anomaly.get("anomalous_ratio", 0.0)) <= 0.006
+        and float(color_anomaly.get("largest_component_ratio", 0.0)) <= 0.006
+        and float(color_anomaly.get("score", 0.0)) <= 0.45
+    )
+    if pale_surface_fiber_like or local_surface_fiber_like or broad_pale_surface_like or texture_spread_fiber_like:
         raw_fiber = {
             **raw_fiber,
-            "score": max(float(raw_fiber.get("score", 0.0)), 0.45 if not broad_pale_surface_like else 0.35),
+            "score": max(
+                float(raw_fiber.get("score", 0.0)),
+                0.40 if texture_spread_fiber_like else (0.45 if not broad_pale_surface_like else 0.35),
+            ),
             "is_suspicious": True,
-            "message": "Acik/gri cig elyaf yuzey anomalisi supheli.",
-            "strategy": f"{raw_fiber.get('strategy', '')}; acik-gri yuzey anomalisi yeniden siniflandirma",
+            "message": "Kabarik/acik cig elyaf yuzey anomalisi supheli.",
+            "strategy": f"{raw_fiber.get('strategy', '')}; acik-gri/dokusal yuzey anomalisi yeniden siniflandirma",
             "mask": raw_fiber.get("mask") if raw_fiber.get("mask") is not None else glass_burn.get("mask"),
             "pale_surface_reclassified": True,
         }

@@ -79,6 +79,12 @@
       "expected_verdict": "UYARI",
       "expected_defects": ["raw_fiber"],
       "note": "Biraz çiğ elyaf."
+    },
+    {
+      "id": 18,
+      "expected_verdict": "UYARI",
+      "expected_defects": ["raw_fiber"],
+      "note": "Kabarık/çiğ elyaf bölgeleri; çerçeve tüm plakayı kapsamalı."
     }
   ]
 }

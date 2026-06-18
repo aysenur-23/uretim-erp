@@ -25,7 +25,7 @@ DISPLAY_THRESHOLDS = {
     "glass_burn": 0.25,
     "raw_fiber": 0.25,
     "color_anomaly": 0.30,
-    "dark_crack": 0.30,
+    "dark_crack": 0.32,
     "local_anomaly": 0.60,
 }
 

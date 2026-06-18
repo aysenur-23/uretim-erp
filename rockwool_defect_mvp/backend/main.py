@@ -304,7 +304,7 @@ def _defects_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
         "glass_burn": 0.25,
         "raw_fiber": 0.25,
         "color_anomaly": 0.30,
-        "dark_crack": 0.30,
+        "dark_crack": 0.32,
         "local_anomaly": 0.60,
     }
     for meta in ordered_defects():
