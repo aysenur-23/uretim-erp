@@ -1,0 +1,17 @@
+camera_source: both
+image_folder_path: data/samples
+webcam_index: 0
+
+output_overlay_path: outputs/overlays
+database_path: data/database/rockwool_mvp.sqlite
+
+min_product_area_ratio: 0.15
+product_hsv_lower: [5, 25, 70]
+product_hsv_upper: [55, 190, 255]
+product_color_profile_threshold: 0.45
+edge_damage_threshold: 0.35
+color_anomaly_threshold: 0.30
+crack_darkness_threshold: 0.45
+local_anomaly_threshold: 0.42
+anomaly_score_suspicious: 0.40
+anomaly_score_defect: 0.70
