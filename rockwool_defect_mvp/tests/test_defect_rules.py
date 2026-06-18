@@ -114,6 +114,35 @@ class DefectRulesTests(unittest.TestCase):
         self.assertTrue(result["is_suspicious"])
         self.assertIsNotNone(result["mask"])
 
+    def test_raw_fiber_flags_raised_fibrous_texture(self) -> None:
+        roi = np.full((340, 240, 3), (95, 125, 82), dtype=np.uint8)
+        for y in range(18, 330, 14):
+            cv2.line(roi, (8, y), (232, y + 2), (112, 145, 98), 2)
+        for center in ((82, 108), (142, 205), (92, 268)):
+            cv2.ellipse(roi, center, (22, 54), -8, 0, 360, (170, 185, 155), -1)
+            for offset in range(-16, 18, 8):
+                cv2.line(
+                    roi,
+                    (center[0] + offset, center[1] - 42),
+                    (center[0] + offset + 8, center[1] + 42),
+                    (214, 220, 198),
+                    3,
+                )
+
+        result = detect_raw_fiber(roi, roi, load_config())
+
+        self.assertTrue(result["is_suspicious"])
+        self.assertGreater(result["raw_fiber_relief_ratio"], 0.01)
+        self.assertIsNotNone(result["mask"])
+
+    def test_raw_fiber_keeps_uniform_panel_normal(self) -> None:
+        roi = np.full((260, 420, 3), (120, 150, 105), dtype=np.uint8)
+
+        result = detect_raw_fiber(roi, roi, load_config())
+
+        self.assertFalse(result["is_suspicious"])
+        self.assertIsNone(result["mask"])
+
     def test_color_strategy_keeps_uniform_panel_normal(self) -> None:
         roi = np.full((260, 420, 3), (120, 150, 105), dtype=np.uint8)
 
