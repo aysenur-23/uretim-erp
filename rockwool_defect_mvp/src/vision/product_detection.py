@@ -36,6 +36,11 @@ def find_product_roi(image: np.ndarray, config: AppConfig) -> ProductROI | None:
         if fallback_contour is not None:
             mask = fallback_mask
             contour = fallback_contour
+            projection_mask = _edge_projection_mask(image, contour)
+            projection_contour = _largest_contour(projection_mask)
+            if projection_contour is not None:
+                mask = projection_mask
+                contour = projection_contour
 
     if contour is None:
         return None
@@ -381,3 +386,57 @@ def _build_grabcut_mask(image: np.ndarray) -> np.ndarray:
     ).astype(np.uint8)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
     return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+
+def _edge_projection_mask(image: np.ndarray, fallback_contour: np.ndarray) -> np.ndarray:
+    """Recover the full rectangular panel when GrabCut keeps only a central band."""
+    image_height, image_width = image.shape[:2]
+    fallback_x, fallback_y, fallback_width, fallback_height = cv2.boundingRect(fallback_contour)
+    if fallback_height >= image_height * 0.75:
+        return np.zeros((image_height, image_width), dtype=np.uint8)
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 50, 150)
+
+    col_profile = _smooth_profile(edges.mean(axis=0), 31)
+    row_profile = _smooth_profile(edges.mean(axis=1), 31)
+    x_range = _profile_extent(col_profile, threshold_ratio=0.25, margin=int(image_width * 0.05))
+    y_range = _profile_extent(row_profile, threshold_ratio=0.25, margin=int(image_height * 0.02))
+    if x_range is None or y_range is None:
+        return np.zeros((image_height, image_width), dtype=np.uint8)
+
+    x1, x2 = x_range
+    y1, y2 = y_range
+    width = x2 - x1 + 1
+    height = y2 - y1 + 1
+    if width <= 0 or height <= 0:
+        return np.zeros((image_height, image_width), dtype=np.uint8)
+
+    projection_area = width * height
+    fallback_area = fallback_width * fallback_height
+    aspect_ratio = max(width, height) / float(max(1, min(width, height)))
+    if projection_area < fallback_area * 1.20 or aspect_ratio < 1.15 or aspect_ratio > 8.0:
+        return np.zeros((image_height, image_width), dtype=np.uint8)
+
+    mask = np.zeros((image_height, image_width), dtype=np.uint8)
+    cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
+    return mask
+
+
+def _smooth_profile(profile: np.ndarray, kernel_size: int) -> np.ndarray:
+    kernel_size = max(3, int(kernel_size) | 1)
+    return cv2.GaussianBlur(profile.astype(np.float32).reshape(1, -1), (1, kernel_size), 0).ravel()
+
+
+def _profile_extent(profile: np.ndarray, *, threshold_ratio: float, margin: int) -> tuple[int, int] | None:
+    if profile.size == 0:
+        return None
+    threshold = float(profile.max()) * threshold_ratio
+    indices = np.where(profile >= threshold)[0]
+    if indices.size == 0:
+        return None
+    indices = indices[(indices >= margin) & (indices < profile.size - margin)]
+    if indices.size == 0:
+        return None
+    return int(indices[0]), int(indices[-1])

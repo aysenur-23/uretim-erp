@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from src.config import load_config
+from src.vision.preprocessing import resize_image
 from src.vision.product_detection import find_product_roi
 
 
@@ -39,6 +41,25 @@ class ProductDetectionTests(unittest.TestCase):
         self.assertGreater(x, 90)
         self.assertLess(width, 560)
         self.assertGreater(width, height)
+
+    def test_tall_textured_panel_uses_full_height_frame(self) -> None:
+        image_path = Path("data/raw/20260619_003206_116660_upload_defects_image8.jpeg")
+        if not image_path.exists():
+            self.skipTest("Local tall textured panel sample is not available.")
+
+        data = np.fromfile(str(image_path), dtype=np.uint8)
+        image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        self.assertIsNotNone(image)
+        assert image is not None
+
+        image = resize_image(image)
+        product = find_product_roi(image, load_config())
+
+        self.assertIsNotNone(product)
+        assert product is not None
+        _x, y, _width, height = product.shape_bbox
+        self.assertLess(y, image.shape[0] * 0.08)
+        self.assertGreater(height, image.shape[0] * 0.88)
 
 
 if __name__ == "__main__":
