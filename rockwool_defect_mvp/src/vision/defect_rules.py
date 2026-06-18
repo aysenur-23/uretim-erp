@@ -192,26 +192,42 @@ def detect_raw_fiber(image: np.ndarray, roi: np.ndarray, config: AppConfig) -> R
     ).astype(np.uint8)
     fiber_mask = _filter_blob_components(fiber_mask, valid_area, min_area_ratio=0.001, max_aspect_ratio=12.0)
     relief_mask = _raw_fiber_relief_mask(gray, hsv[:, :, 1], valid_mask)
-    combined_mask = cv2.bitwise_or(fiber_mask, relief_mask)
+    glass_fiber_mask = _glass_fiber_mask(gray, hsv[:, :, 1], valid_mask)
+    combined_mask = cv2.bitwise_or(cv2.bitwise_or(fiber_mask, relief_mask), glass_fiber_mask)
 
     fiber_ratio = float(cv2.countNonZero(fiber_mask)) / float(max(1, valid_area))
     relief_ratio = float(cv2.countNonZero(relief_mask)) / float(max(1, valid_area))
+    glass_fiber_ratio = float(cv2.countNonZero(glass_fiber_mask)) / float(max(1, valid_area))
     combined_ratio = float(cv2.countNonZero(combined_mask)) / float(max(1, valid_area))
+    structural_mask = cv2.bitwise_or(fiber_mask, relief_mask)
+    structural_largest_ratio = _largest_component_area_ratio(structural_mask, valid_area)
     largest_ratio = _largest_component_area_ratio(combined_mask, valid_area)
-    score = _clip01(max(fiber_ratio * 3.2, relief_ratio * 4.0, largest_ratio * 10.0))
+    glass_largest_ratio = _largest_component_area_ratio(glass_fiber_mask, valid_area)
+    score = _clip01(
+        max(
+            fiber_ratio * 3.2,
+            relief_ratio * 4.0,
+            structural_largest_ratio * 10.0,
+            glass_fiber_ratio * 4.0,
+            glass_largest_ratio * 4.0,
+        )
+    )
     is_suspicious = score >= 0.26
     return {
         **_result(
             score,
             is_suspicious,
-            "Acik/kabarik cig elyaf bolgesi supheli." if is_suspicious else "Cig elyaf sinyali normal.",
+            "Cam/cig elyaf bolgesi supheli." if is_suspicious else "Cam/cig elyaf sinyali normal.",
         ),
-        "strategy": "Parlak dusuk doygunluklu bolge + lokal kabarik/dokusal lif maskesi",
+        "strategy": "Parlak camsi lif + dusuk doygunluklu bolge + lokal kabarik/dokusal lif maskesi",
         "mask": combined_mask if cv2.countNonZero(combined_mask) > 0 else None,
         "raw_fiber_ratio": round(fiber_ratio, 4),
         "raw_fiber_relief_ratio": round(relief_ratio, 4),
+        "glass_fiber_ratio": round(glass_fiber_ratio, 4),
         "raw_fiber_combined_ratio": round(combined_ratio, 4),
         "largest_component_ratio": round(largest_ratio, 4),
+        "structural_largest_component_ratio": round(structural_largest_ratio, 4),
+        "glass_fiber_largest_component_ratio": round(glass_largest_ratio, 4),
     }
 
 
@@ -604,6 +620,52 @@ def _raw_fiber_relief_mask(gray: np.ndarray, sat: np.ndarray, valid_mask: np.nda
         fill_ratio = area / float(max(1, width * height))
         touches_vertical_border = x <= 1 or x + width >= mask.shape[1] - 1
         if aspect_ratio > 24.0 and fill_ratio < 0.22 and touches_vertical_border:
+            continue
+        output[labels == label] = 255
+    return output
+
+
+def _glass_fiber_mask(gray: np.ndarray, sat: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
+    valid_area = cv2.countNonZero(valid_mask)
+    if valid_area < 64:
+        return np.zeros_like(gray, dtype=np.uint8)
+
+    baseline = _illumination_baseline(gray, valid_mask)
+    local_lift = np.clip(gray.astype(np.float32) - baseline.astype(np.float32), 0, 255).astype(np.uint8)
+    vertical_tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 21)))
+    horizontal_tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5)))
+    bright_fiber = cv2.max(local_lift, cv2.max(vertical_tophat, horizontal_tophat))
+
+    valid_bright = bright_fiber[valid_mask > 0]
+    valid_sat = sat[valid_mask > 0]
+    valid_gray = gray[valid_mask > 0]
+    bright_threshold = max(float(np.percentile(valid_bright, 92)), float(np.median(valid_bright) + 24.0), 30.0)
+    sat_limit = min(float(np.percentile(valid_sat, 76)), float(np.median(valid_sat) + 48.0), 150.0)
+    gray_floor = max(float(np.percentile(valid_gray, 55)), float(np.median(valid_gray) + 4.0))
+
+    mask = np.where(
+        (valid_mask > 0)
+        & (bright_fiber >= bright_threshold)
+        & (sat <= sat_limit)
+        & (gray >= gray_floor),
+        255,
+        0,
+    ).astype(np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 7)), iterations=1)
+
+    output = np.zeros_like(mask)
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    min_area = max(10, int(valid_area * 0.00018))
+    for label in range(1, component_count):
+        _x, _y, width, height, area = stats[label]
+        if area < min_area:
+            continue
+        long_side = max(width, height)
+        short_side = max(1, min(width, height))
+        aspect_ratio = long_side / float(short_side)
+        fill_ratio = area / float(max(1, width * height))
+        if aspect_ratio < 1.55 and fill_ratio > 0.70:
             continue
         output[labels == label] = 255
     return output

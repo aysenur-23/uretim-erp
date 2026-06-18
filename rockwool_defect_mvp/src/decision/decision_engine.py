@@ -52,7 +52,7 @@ def _rule_display_name(name: str) -> str:
         "deformation": "Deformasyon",
         "color_anomaly": "Renk",
         "glass_burn": "Cam yanigi",
-        "raw_fiber": "Cig elyaf",
+        "raw_fiber": "Cam/cig elyaf",
         "dark_crack": "Catlak",
         "local_anomaly": "Yerel anomali",
     }.get(name, name)

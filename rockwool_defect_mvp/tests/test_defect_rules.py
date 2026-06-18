@@ -147,6 +147,19 @@ class DefectRulesTests(unittest.TestCase):
         self.assertGreater(result["raw_fiber_relief_ratio"], 0.01)
         self.assertIsNotNone(result["mask"])
 
+    def test_raw_fiber_flags_bright_glass_fiber_strands(self) -> None:
+        roi = np.full((300, 260, 3), (96, 132, 86), dtype=np.uint8)
+        for y in range(45, 260, 22):
+            cv2.line(roi, (42, y), (215, y + 7), (215, 225, 205), 2)
+        for x in (80, 135, 190):
+            cv2.line(roi, (x, 55), (x + 18, 250), (225, 232, 214), 2)
+
+        result = detect_raw_fiber(roi, roi, load_config())
+
+        self.assertTrue(result["is_suspicious"])
+        self.assertGreater(result["glass_fiber_ratio"], 0.02)
+        self.assertIsNotNone(result["mask"])
+
     def test_raw_fiber_keeps_uniform_panel_normal(self) -> None:
         roi = np.full((260, 420, 3), (120, 150, 105), dtype=np.uint8)
 

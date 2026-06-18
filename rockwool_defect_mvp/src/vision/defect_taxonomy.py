@@ -49,11 +49,11 @@ DEFECT_TAXONOMY: dict[str, DefectMeta] = {
     "raw_fiber": DefectMeta(
         defect_type="raw_fiber",
         score_key="raw_fiber_score",
-        label="Çiğ elyaf",
+        label="Cam/çiğ elyaf",
         category="Malzeme",
         overlay_color="#38bdf8",
-        strategy="Açık renkli, düşük doygunluklu ve lifsi görünen bölgeler renk/eşik maskesiyle ayrılır.",
-        description="Bağlayıcı veya yüzey kaplaması oturmamış açık, lifsi alanlar.",
+        strategy="Parlak camsı lifler, açık renkli düşük doygunluklu alanlar ve kabarık lif dokusu birlikte aranır.",
+        description="Cam elyafı, bağlayıcı oturmamış açık/berrak lifler veya çiğ lifsi alanlar.",
         decision_impact="Alan büyüdükçe UYARI'dan RED'e yükseltilir.",
     ),
     "color_anomaly": DefectMeta(
