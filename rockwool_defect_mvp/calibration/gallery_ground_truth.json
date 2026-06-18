@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "notes": "Local gallery calibration labels from operator feedback. Defects list contains the expected user-visible primary defects.",
+  "items": [
+    {
+      "id": 3,
+      "expected_verdict": "KABUL",
+      "expected_defects": [],
+      "note": "Temiz referans."
+    },
+    {
+      "id": 5,
+      "expected_verdict": "RED",
+      "expected_defects": ["raw_fiber"],
+      "note": "Bolca çiğ elyaf."
+    },
+    {
+      "id": 6,
+      "expected_verdict": "RED",
+      "expected_defects": ["dark_crack"],
+      "note": "Çatlaklar var; kenar ana kusur değil."
+    },
+    {
+      "id": 7,
+      "expected_verdict": "KABUL",
+      "expected_defects": [],
+      "note": "Temiz referans."
+    },
+    {
+      "id": 8,
+      "expected_verdict": "RED",
+      "expected_defects": ["glass_burn"],
+      "note": "Cam yanığı / koyu leke; çatlak değil."
+    },
+    {
+      "id": 9,
+      "expected_verdict": "RED",
+      "expected_defects": ["dark_crack"],
+      "note": "Çatlak dolu."
+    },
+    {
+      "id": 10,
+      "expected_verdict": "RED",
+      "expected_defects": ["dark_crack"],
+      "note": "Çatlak dolu."
+    },
+    {
+      "id": 11,
+      "expected_verdict": "RED",
+      "expected_defects": ["dark_crack"],
+      "note": "Çatlak dolu."
+    },
+    {
+      "id": 12,
+      "expected_verdict": "RED",
+      "expected_defects": ["dark_crack"],
+      "note": "Çatlak dolu; cam yanığı değil."
+    },
+    {
+      "id": 13,
+      "expected_verdict": "UYARI",
+      "expected_defects": ["raw_fiber"],
+      "note": "Biraz çiğ elyaf; cam yanığı/çatlak yok."
+    },
+    {
+      "id": 14,
+      "expected_verdict": "UYARI",
+      "expected_defects": ["raw_fiber"],
+      "note": "Biraz çiğ elyaf; cam yanığı/çatlak yok."
+    },
+    {
+      "id": 15,
+      "expected_verdict": "UYARI",
+      "expected_defects": ["raw_fiber"],
+      "note": "Biraz çiğ elyaf; çatlak yok."
+    },
+    {
+      "id": 16,
+      "expected_verdict": "UYARI",
+      "expected_defects": ["raw_fiber"],
+      "note": "Biraz çiğ elyaf."
+    }
+  ]
+}

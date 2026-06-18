@@ -363,6 +363,7 @@ def _build_grabcut_mask(image: np.ndarray) -> np.ndarray:
     grabcut_mask = np.zeros((height, width), dtype=np.uint8)
     background_model = np.zeros((1, 65), dtype=np.float64)
     foreground_model = np.zeros((1, 65), dtype=np.float64)
+    cv2.setRNGSeed(12345)
     cv2.grabCut(
         image,
         grabcut_mask,
