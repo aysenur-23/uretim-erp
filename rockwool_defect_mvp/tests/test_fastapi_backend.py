@@ -63,10 +63,27 @@ class FastApiBackendTests(unittest.TestCase):
                     self.assertEqual(item["source"], "upload")
                     self.assertIn(item["verdict"], {"KABUL", "RED", "UYARI"})
                     self.assertGreaterEqual(len(item["pipeline"]), 5)
+                    self.assertIn("roiConfidence", item)
+                    self.assertGreaterEqual(item["roiConfidence"], 0.0)
 
                     list_response = client.get("/api/analyses")
                     self.assertEqual(list_response.status_code, 200)
                     self.assertEqual(len(list_response.json()["items"]), 1)
+
+                    feedback_response = client.post(
+                        f"/api/analyses/{record_id}/feedback",
+                        json={
+                            "expectedVerdict": "KABUL",
+                            "expectedDefects": [],
+                            "note": "operator check",
+                        },
+                    )
+                    self.assertEqual(feedback_response.status_code, 200, feedback_response.text)
+                    metrics_response = client.get("/api/calibration/metrics")
+                    self.assertEqual(metrics_response.status_code, 200)
+                    metrics = metrics_response.json()
+                    self.assertEqual(metrics["feedbackCount"], 1)
+                    self.assertIn("perDefect", metrics)
 
                     image_response = client.get(f"/api/images/{record_id}?v=overlay")
                     self.assertEqual(image_response.status_code, 200)

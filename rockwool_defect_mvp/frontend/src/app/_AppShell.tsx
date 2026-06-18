@@ -17,6 +17,7 @@ export type StoredAnalysis = {
   previousOverlaySrc?: string | null;
   verdict: "KABUL" | "RED" | "UYARI";
   confidence: number;
+  roiConfidence?: number;
   defects: DefectDetail[];
   pipeline?: PipelineStep[];
   metrics?: DetailItem["metrics"];
@@ -165,6 +166,27 @@ export default function AppShell({
     }
   }
 
+  async function saveFeedback(id: string, payload: { expectedVerdict: string; expectedDefects: string[]; note: string }) {
+    setError(null);
+    setActionId(id);
+    try {
+      const response = await fetch(`/api/analyses/${id}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        setError("Geri bildirim kaydedilemedi.");
+        return;
+      }
+      await reload();
+    } catch {
+      setError("Geri bildirim kaydedilemedi.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
   const visibleStored = filter ? stored.filter((item) => item.verdict === filter) : stored;
   const pendingCards: CardItem[] = pending.map((item) => ({
     id: item.id,
@@ -186,6 +208,7 @@ export default function AppShell({
     overlaySrc: item.overlaySrc,
     verdict: item.verdict,
     confidence: item.confidence,
+    roiConfidence: item.roiConfidence,
     defects: item.defects,
     meta: item.meta ?? `${new Date(item.created_at).toLocaleString("tr-TR")} · ${item.source === "camera" ? "Kamera" : "Yükleme"}`,
   }));
@@ -273,6 +296,7 @@ export default function AppShell({
         onClose={() => setDetail(null)}
         onReprocess={reprocessItem}
         onDelete={deleteItem}
+        onFeedback={saveFeedback}
         actionBusy={!!detail && actionId === detail.id}
       />
     </div>
@@ -288,6 +312,7 @@ function itemToDetail(item: StoredAnalysis): DetailItem {
     overlaySrc: item.overlaySrc,
     verdict: item.verdict,
     confidence: item.confidence,
+    roiConfidence: item.roiConfidence,
     defects: item.defects,
     pipeline: item.pipeline,
     createdAt: item.created_at,

@@ -37,11 +37,20 @@ class SQLiteStoreTests(unittest.TestCase):
             rows = store.fetch_recent_inspection_records(limit=10)
             filtered_rows = store.fetch_recent_inspection_records(limit=10, model_result="SAGLAM")
             missing_rows = store.fetch_recent_inspection_records(limit=10, model_result="HATALI")
+            feedback_id = store.insert_operator_feedback(
+                record_id,
+                "RED",
+                '["dark_crack"]',
+                "visible crack",
+                "20260608_010204_000001",
+            )
+            feedback_rows = store.fetch_operator_feedback(limit=10)
             updated = store.update_operator_feedback(record_id, "catlak", "changed", True)
             model_updated = store.update_model_result(
                 record_id,
                 "HATALI",
                 0.8,
+                0.9,
                 0.1,
                 0.15,
                 0.2,
@@ -64,6 +73,10 @@ class SQLiteStoreTests(unittest.TestCase):
         self.assertEqual(len(filtered_rows), 1)
         self.assertEqual(missing_rows, [])
         self.assertEqual(rows[0]["local_anomaly_score"], 0.3)
+        self.assertEqual(feedback_id, 1)
+        self.assertEqual(len(feedback_rows), 1)
+        self.assertEqual(feedback_rows[0]["record_id"], record_id)
+        self.assertEqual(feedback_rows[0]["expected_verdict"], "RED")
         self.assertTrue(updated)
         self.assertTrue(model_updated)
         assert updated_record is not None

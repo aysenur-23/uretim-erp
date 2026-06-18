@@ -13,6 +13,7 @@ INSPECTION_COLUMNS = [
     "product_type",
     "model_result",
     "anomaly_score",
+    "roi_confidence",
     "edge_damage_score",
     "deformation_score",
     "color_anomaly_score",
@@ -52,6 +53,7 @@ class SQLiteStore:
                         product_type TEXT,
                         model_result TEXT,
                         anomaly_score REAL,
+                        roi_confidence REAL,
                         edge_damage_score REAL,
                         deformation_score REAL,
                         color_anomaly_score REAL,
@@ -71,6 +73,7 @@ class SQLiteStore:
                     """
                 )
                 self._ensure_column(connection, "local_anomaly_score", "REAL")
+                self._ensure_column(connection, "roi_confidence", "REAL")
                 self._ensure_column(connection, "deformation_score", "REAL")
                 self._ensure_column(connection, "glass_burn_score", "REAL")
                 self._ensure_column(connection, "raw_fiber_score", "REAL")
@@ -79,6 +82,19 @@ class SQLiteStore:
                 self._ensure_column(connection, "previous_model_result", "TEXT")
                 self._ensure_column(connection, "previous_anomaly_score", "REAL")
                 self._ensure_column(connection, "last_reprocessed_at", "TEXT")
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS operator_feedback (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        record_id INTEGER NOT NULL,
+                        expected_verdict TEXT NOT NULL,
+                        expected_defects TEXT NOT NULL DEFAULT '[]',
+                        note TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(record_id) REFERENCES inspection_records(id) ON DELETE CASCADE
+                    )
+                    """
+                )
 
     def insert_inspection_record(self, record: dict[str, Any]) -> int:
         columns = INSPECTION_COLUMNS
@@ -123,6 +139,7 @@ class SQLiteStore:
                     product_type,
                     model_result,
                     anomaly_score,
+                    roi_confidence,
                     edge_damage_score,
                     deformation_score,
                     color_anomaly_score,
@@ -160,6 +177,7 @@ class SQLiteStore:
                     product_type,
                     model_result,
                     anomaly_score,
+                    roi_confidence,
                     edge_damage_score,
                     deformation_score,
                     color_anomaly_score,
@@ -218,11 +236,67 @@ class SQLiteStore:
                 )
         return cursor.rowcount > 0
 
+    def insert_operator_feedback(
+        self,
+        record_id: int,
+        expected_verdict: str,
+        expected_defects: str,
+        note: str,
+        created_at: str,
+    ) -> int:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO operator_feedback (
+                        record_id,
+                        expected_verdict,
+                        expected_defects,
+                        note,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (int(record_id), expected_verdict, expected_defects, note, created_at),
+                )
+                return int(cursor.lastrowid)
+
+    def fetch_operator_feedback(self, limit: int = 500) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 1000))
+        with closing(self._connect()) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT
+                    feedback.id,
+                    feedback.record_id,
+                    feedback.expected_verdict,
+                    feedback.expected_defects,
+                    feedback.note,
+                    feedback.created_at,
+                    records.model_result,
+                    records.anomaly_score,
+                    records.edge_damage_score,
+                    records.deformation_score,
+                    records.color_anomaly_score,
+                    records.glass_burn_score,
+                    records.raw_fiber_score,
+                    records.crack_score,
+                    records.local_anomaly_score
+                FROM operator_feedback AS feedback
+                LEFT JOIN inspection_records AS records ON records.id = feedback.record_id
+                ORDER BY feedback.created_at DESC, feedback.id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def update_model_result(
         self,
         record_id: int,
         model_result: str,
         anomaly_score: float,
+        roi_confidence: float,
         edge_damage_score: float,
         deformation_score: float,
         color_anomaly_score: float,
@@ -243,6 +317,7 @@ class SQLiteStore:
                     SET
                         model_result = ?,
                         anomaly_score = ?,
+                        roi_confidence = ?,
                         edge_damage_score = ?,
                         deformation_score = ?,
                         color_anomaly_score = ?,
@@ -259,6 +334,7 @@ class SQLiteStore:
                     (
                         model_result,
                         anomaly_score,
+                        roi_confidence,
                         edge_damage_score,
                         deformation_score,
                         color_anomaly_score,

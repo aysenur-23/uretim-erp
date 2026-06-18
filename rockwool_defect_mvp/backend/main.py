@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import os
 from pathlib import Path
 from shutil import copy2
@@ -12,6 +13,7 @@ import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from src.config import AppConfig, ensure_runtime_directories, load_config
 from src.storage.sqlite_store import SQLiteStore
@@ -28,6 +30,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class FeedbackPayload(BaseModel):
+    expectedVerdict: str
+    expectedDefects: list[str] = []
+    note: str = ""
 
 
 def get_config() -> AppConfig:
@@ -134,6 +142,45 @@ def defect_types() -> dict[str, Any]:
     }
 
 
+@app.get("/api/calibration/metrics")
+def calibration_metrics() -> dict[str, Any]:
+    config = get_config()
+    rows = SQLiteStore(config.database_path).fetch_operator_feedback(limit=1000)
+    return _calibration_metrics(rows)
+
+
+@app.post("/api/analyses/{record_id}/feedback")
+def save_feedback(record_id: int, payload: FeedbackPayload) -> dict[str, Any]:
+    config = get_config()
+    store = SQLiteStore(config.database_path)
+    record = store.fetch_inspection_record(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    expected_verdict = payload.expectedVerdict.upper()
+    if expected_verdict not in {"KABUL", "RED", "UYARI"}:
+        raise HTTPException(status_code=400, detail="Unsupported expected verdict")
+
+    known_defects = {meta.defect_type for meta in ordered_defects()}
+    expected_defects = sorted({item for item in payload.expectedDefects if item in known_defects})
+    feedback_id = store.insert_operator_feedback(
+        record_id=record_id,
+        expected_verdict=expected_verdict,
+        expected_defects=json.dumps(expected_defects, ensure_ascii=False),
+        note=payload.note.strip()[:500],
+        created_at=datetime.now().strftime("%Y%m%d_%H%M%S_%f"),
+    )
+    store.update_operator_feedback(
+        record_id,
+        operator_label=_operator_label_from_feedback(expected_verdict, expected_defects),
+        operator_note=payload.note.strip()[:500],
+        is_model_wrong=_model_to_ui_verdict(record.get("model_result")) != expected_verdict
+        or set(_defect_types_from_record(record)) != set(expected_defects),
+    )
+    metrics = _calibration_metrics(store.fetch_operator_feedback(limit=1000))
+    return {"ok": True, "feedbackId": feedback_id, "metrics": metrics}
+
+
 @app.get("/api/images/{record_id}")
 def get_image(record_id: int, v: str = Query("overlay", pattern="^(raw|overlay|previous)$")) -> FileResponse:
     config = get_config()
@@ -174,6 +221,7 @@ def reprocess(record_id: int) -> dict[str, Any]:
         record_id,
         decision_label,
         anomaly_score,
+        _roi_confidence_from_analysis(analysis),
         _rule_score(analysis, "edge_damage"),
         _rule_score(analysis, "deformation"),
         _rule_score(analysis, "color_anomaly"),
@@ -251,6 +299,7 @@ def _save_analysis_record(
         "product_type": source,
         "model_result": decision_label,
         "anomaly_score": anomaly_score,
+        "roi_confidence": _roi_confidence_from_analysis(analysis),
         "edge_damage_score": _rule_score(analysis, "edge_damage"),
         "deformation_score": _rule_score(analysis, "deformation"),
         "color_anomaly_score": _rule_score(analysis, "color_anomaly"),
@@ -283,6 +332,7 @@ def _record_to_item(record: dict[str, Any] | None) -> dict[str, Any]:
         "source": source,
         "verdict": verdict,
         "confidence": confidence,
+        "roiConfidence": round(float(record.get("roi_confidence") or 0.0), 3),
         "defects": _defects_from_record(record),
         "pipeline": PIPELINE_STEPS,
         "metrics": _metrics_from_record(record),
@@ -317,6 +367,8 @@ def _defects_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
                 "label": meta.label,
                 "score": round(score * 100),
                 "severity": _severity(score),
+                "confidence": round(score * 100),
+                "reason": _defect_reason(meta.defect_type, score),
                 "category": meta.category,
                 "overlayColor": meta.overlay_color,
                 "strategy": meta.strategy,
@@ -338,6 +390,135 @@ def _metrics_from_record(record: dict[str, Any]) -> dict[str, float]:
         "rectangularity": max(0.0, 1.0 - float(record.get("deformation_score") or record.get("edge_damage_score") or 0.0)),
         "squarenessDeg": float(record.get("edge_damage_score") or 0.0) * 10,
     }
+
+
+def _roi_confidence_from_analysis(analysis: AnalysisView) -> float:
+    product = analysis.product
+    if product is None:
+        return 0.0
+    x, y, width, height = product.shape_bbox
+    image_height, image_width = analysis.original.shape[:2]
+    bbox_area_ratio = (width * height) / float(max(1, image_width * image_height))
+    aspect_ratio = max(width, height) / float(max(1, min(width, height)))
+    area_score = min(1.0, max(0.0, (bbox_area_ratio - 0.12) / 0.58))
+    aspect_score = 1.0 - min(1.0, abs(aspect_ratio - 1.85) / 2.3)
+    border_score = 1.0
+    if x <= 0 or y <= 0 or x + width >= image_width or y + height >= image_height:
+        border_score = 0.82
+    return round(max(0.0, min(1.0, area_score * 0.55 + aspect_score * 0.35 + border_score * 0.10)), 3)
+
+
+def _defect_reason(defect_type: str, score: float) -> str:
+    if defect_type == "dark_crack":
+        return "İnce, uzun ve koyu çizgisel bileşenler eşik üstünde."
+    if defect_type == "glass_burn":
+        return "Işık dengesi sonrası geniş koyu/kahverengi leke sinyali var."
+    if defect_type == "raw_fiber":
+        return "Parlak camsı lif, açık düşük doygunluk veya kabarık lif dokusu bulundu."
+    if defect_type == "edge_damage":
+        return "Ürün kenarında kontur/boşluk düzensizliği bulundu."
+    if defect_type == "deformation":
+        return "Dikdörtgen forma göre şekil sapması ölçüldü."
+    if defect_type == "color_anomaly":
+        return "Ürün renginden ayrışan kompakt renk/leke alanı bulundu."
+    if defect_type == "local_anomaly":
+        return "Genel doku/parlaklık heatmap sinyali eşik üstünde."
+    return f"Skor eşik üstünde: {score:.3f}"
+
+
+def _calibration_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    defect_keys = [meta.defect_type for meta in ordered_defects()]
+    per_defect = {key: {"tp": 0, "fp": 0, "fn": 0} for key in defect_keys}
+    verdict = {"total": 0, "correct": 0}
+    mismatches = []
+
+    for row in rows:
+        if not row.get("model_result"):
+            continue
+        verdict["total"] += 1
+        expected_verdict = str(row.get("expected_verdict") or "")
+        predicted_verdict = _model_to_ui_verdict(row.get("model_result"))
+        if expected_verdict == predicted_verdict:
+            verdict["correct"] += 1
+
+        expected_defects = set(_load_expected_defects(row.get("expected_defects")))
+        predicted_defects = set(_defect_types_from_record(row))
+        false_positive = sorted(predicted_defects - expected_defects)
+        false_negative = sorted(expected_defects - predicted_defects)
+        for defect in defect_keys:
+            if defect in expected_defects and defect in predicted_defects:
+                per_defect[defect]["tp"] += 1
+            elif defect not in expected_defects and defect in predicted_defects:
+                per_defect[defect]["fp"] += 1
+            elif defect in expected_defects and defect not in predicted_defects:
+                per_defect[defect]["fn"] += 1
+
+        if expected_verdict != predicted_verdict or false_positive or false_negative:
+            mismatches.append(
+                {
+                    "recordId": row.get("record_id"),
+                    "expectedVerdict": expected_verdict,
+                    "predictedVerdict": predicted_verdict,
+                    "falsePositive": false_positive,
+                    "falseNegative": false_negative,
+                    "note": row.get("note") or "",
+                }
+            )
+
+    per_defect_metrics = []
+    for defect, values in per_defect.items():
+        tp = values["tp"]
+        fp = values["fp"]
+        fn = values["fn"]
+        precision = tp / (tp + fp) if tp + fp else 1.0
+        recall = tp / (tp + fn) if tp + fn else 1.0
+        per_defect_metrics.append(
+            {
+                "type": defect,
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+                "precision": round(precision, 3),
+                "recall": round(recall, 3),
+            }
+        )
+
+    accuracy = verdict["correct"] / verdict["total"] if verdict["total"] else 1.0
+    return {
+        "feedbackCount": verdict["total"],
+        "verdictAccuracy": round(accuracy, 3),
+        "perDefect": per_defect_metrics,
+        "mismatches": mismatches[:50],
+        "nextPhases": [
+            "Çatlak, cam yanığı ve kenar deformasyon kuralları FP/FN metriklerine göre ayrı ayrı güçlendirilecek.",
+            "Yeterli etiketli veri birikince segmentation model eğitim seti çıkarılacak.",
+            "VLM sadece açıklama, rapor ve operatör özetlerinde kullanılacak; karar motorunun yerine geçmeyecek.",
+        ],
+    }
+
+
+def _load_expected_defects(value: object) -> list[str]:
+    if not value:
+        return []
+    try:
+        loaded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in loaded if isinstance(item, str)]
+
+
+def _defect_types_from_record(record: dict[str, Any]) -> list[str]:
+    if record.get("model_result") == "SAGLAM":
+        return []
+    return [item["type"] for item in _defects_from_record(record)]
+
+
+def _operator_label_from_feedback(expected_verdict: str, expected_defects: list[str]) -> str:
+    if expected_verdict == "KABUL":
+        return "saglam"
+    if expected_defects:
+        return ",".join(expected_defects)
+    return "diger"
 
 
 def _model_to_ui_verdict(label: object) -> str:

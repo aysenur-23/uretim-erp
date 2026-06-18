@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { VerdictBadge, type Verdict } from "./VerdictBadge";
 
@@ -6,9 +7,11 @@ export type DefectDetail = {
   type: string;
   label: string;
   score: number;
+  confidence?: number;
   severity: string;
   category?: string;
   overlayColor?: string;
+  reason?: string;
   strategy?: string;
   description?: string;
   decisionImpact?: string;
@@ -28,14 +31,19 @@ export type DetailItem = {
   overlaySrc: string;
   verdict: Verdict;
   confidence: number;
+  roiConfidence?: number;
   defects: DefectDetail[];
   pipeline?: PipelineStep[];
   createdAt?: number;
   metrics?: {
-    meanH: number; meanS: number; meanV: number;
-    brightSpotRatio: number; darkSpotRatio: number;
+    meanH: number;
+    meanS: number;
+    meanV: number;
+    brightSpotRatio: number;
+    darkSpotRatio: number;
     longLineScore: number;
-    rectangularity: number; squarenessDeg: number;
+    rectangularity: number;
+    squarenessDeg: number;
   };
 };
 
@@ -44,35 +52,51 @@ export function DetailModal({
   onClose,
   onReprocess,
   onDelete,
+  onFeedback,
   actionBusy,
 }: {
   item: DetailItem | null;
   onClose: () => void;
   onReprocess?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onFeedback?: (id: string, payload: { expectedVerdict: string; expectedDefects: string[]; note: string }) => Promise<void>;
   actionBusy?: boolean;
 }) {
   const [showOverlay, setShowOverlay] = useState(true);
+  const [expectedVerdict, setExpectedVerdict] = useState<Verdict>("KABUL");
+  const [expectedDefects, setExpectedDefects] = useState<string[]>([]);
+  const [feedbackNote, setFeedbackNote] = useState("");
+
   useEffect(() => {
     if (!item) return;
     setShowOverlay(true);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    setExpectedVerdict(item.verdict);
+    setExpectedDefects(item.defects.map((defect) => defect.type));
+    setFeedbackNote("");
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
     window.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
   }, [item, onClose]);
+
   if (!item) return null;
 
   const m = item.metrics;
-  const sev = (s: string) =>
-    s === "high" ? "bg-red-100 text-red-700"
-    : s === "medium" ? "bg-amber-100 text-amber-700"
-    : "bg-slate-100 text-slate-600";
+  const severityClass = (severity: string) =>
+    severity === "high"
+      ? "bg-red-100 text-red-700"
+      : severity === "medium"
+        ? "bg-amber-100 text-amber-700"
+        : "bg-slate-100 text-slate-600";
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur flex items-stretch" onClick={onClose}>
-      <div className="m-auto w-full max-w-6xl bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col md:flex-row max-h-[95vh]" onClick={(e) => e.stopPropagation()}>
-        {/* Image */}
+      <div className="m-auto w-full max-w-6xl bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col md:flex-row max-h-[95vh]" onClick={(event) => event.stopPropagation()}>
         <div className="relative bg-slate-900 flex-1 min-h-[300px] md:min-h-[500px]">
           <img
             src={showOverlay ? item.overlaySrc : item.originalSrc}
@@ -80,7 +104,7 @@ export function DetailModal({
             className="absolute inset-0 w-full h-full object-contain"
           />
           <button
-            onClick={() => setShowOverlay((s) => !s)}
+            onClick={() => setShowOverlay((value) => !value)}
             className="absolute bottom-3 left-3 text-xs bg-white/95 px-3 py-1.5 rounded shadow hover:bg-white"
           >
             {showOverlay ? "Orijinali Gör" : "Analizi Gör"}
@@ -90,8 +114,7 @@ export function DetailModal({
           </div>
         </div>
 
-        {/* Sidebar */}
-        <div className="md:w-80 p-5 overflow-y-auto bg-white">
+        <div className="md:w-96 p-5 overflow-y-auto bg-white">
           <div className="flex items-start justify-between gap-2 mb-3">
             <div className="min-w-0">
               <div className="font-semibold truncate" title={item.filename}>{item.filename}</div>
@@ -101,7 +124,7 @@ export function DetailModal({
                 </div>
               )}
             </div>
-            <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] text-xl leading-none" aria-label="Kapat">✕</button>
+            <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] text-xl leading-none" aria-label="Kapat">×</button>
           </div>
 
           <div className="mt-3">
@@ -110,23 +133,20 @@ export function DetailModal({
               <p className="text-sm text-emerald-700">Tespit edilen hata yok.</p>
             ) : (
               <ul className="space-y-2">
-                {item.defects.map((d) => (
-                  <li key={d.type} className="rounded-lg border border-[var(--border)] p-3">
+                {item.defects.map((defect) => (
+                  <li key={defect.type} className="rounded-lg border border-[var(--border)] p-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-2 text-sm font-semibold">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.overlayColor ?? "#64748b" }} />
-                        {d.label}
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: defect.overlayColor ?? "#64748b" }} />
+                        {defect.label}
                       </span>
-                      <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${sev(d.severity)}`}>%{d.score}</span>
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${severityClass(defect.severity)}`}>%{defect.confidence ?? defect.score}</span>
                     </div>
-                    {d.category && <div className="mt-1 text-[11px] uppercase tracking-wider text-[var(--text-muted)]">{d.category}</div>}
-                    {d.description && <p className="mt-2 text-xs text-[var(--text-muted)]">{d.description}</p>}
-                    {d.strategy && (
-                      <p className="mt-2 text-xs text-[var(--text)]">
-                        <span className="font-semibold">Strateji:</span> {d.strategy}
-                      </p>
-                    )}
-                    {d.decisionImpact && <p className="mt-1 text-[11px] text-[var(--text-muted)]">{d.decisionImpact}</p>}
+                    {defect.category && <div className="mt-1 text-[11px] uppercase tracking-wider text-[var(--text-muted)]">{defect.category}</div>}
+                    {defect.description && <p className="mt-2 text-xs text-[var(--text-muted)]">{defect.description}</p>}
+                    {defect.reason && <p className="mt-2 text-xs text-[var(--text)]"><span className="font-semibold">Neden:</span> {defect.reason}</p>}
+                    {defect.strategy && <p className="mt-2 text-xs text-[var(--text)]"><span className="font-semibold">Strateji:</span> {defect.strategy}</p>}
+                    {defect.decisionImpact && <p className="mt-1 text-[11px] text-[var(--text-muted)]">{defect.decisionImpact}</p>}
                   </li>
                 ))}
               </ul>
@@ -151,6 +171,7 @@ export function DetailModal({
             <div className="mt-5">
               <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Ham metrikler</h3>
               <dl className="text-xs grid grid-cols-2 gap-x-3 gap-y-1.5 text-[var(--text-muted)]">
+                <dt>ROI confidence</dt><dd className="text-right text-[var(--text)] tabular-nums">%{((item.roiConfidence ?? 0) * 100).toFixed(1)}</dd>
                 <dt>Plaka medyan H</dt><dd className="text-right text-[var(--text)] tabular-nums">{m.meanH.toFixed(1)}°</dd>
                 <dt>Plaka medyan S</dt><dd className="text-right text-[var(--text)] tabular-nums">{m.meanS.toFixed(1)}%</dd>
                 <dt>Plaka medyan V</dt><dd className="text-right text-[var(--text)] tabular-nums">{m.meanV.toFixed(1)}%</dd>
@@ -163,9 +184,55 @@ export function DetailModal({
             </div>
           )}
 
+          {onFeedback && (
+            <div className="mt-5 rounded-lg border border-[var(--border)] p-3">
+              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Operatör geri bildirimi</h3>
+              <label className="text-xs text-[var(--text-muted)]">Beklenen karar</label>
+              <select
+                value={expectedVerdict}
+                onChange={(event) => setExpectedVerdict(event.target.value as Verdict)}
+                className="mt-1 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
+              >
+                <option value="KABUL">KABUL</option>
+                <option value="UYARI">UYARI</option>
+                <option value="RED">RED</option>
+              </select>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                {DEFECT_OPTIONS.map((option) => (
+                  <label key={option.type} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={expectedDefects.includes(option.type)}
+                      onChange={(event) => {
+                        setExpectedDefects((items) => event.target.checked
+                          ? Array.from(new Set([...items, option.type]))
+                          : items.filter((value) => value !== option.type));
+                      }}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+              <textarea
+                value={feedbackNote}
+                onChange={(event) => setFeedbackNote(event.target.value)}
+                placeholder="Kısa not"
+                className="mt-3 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-xs"
+                rows={2}
+              />
+              <button
+                disabled={actionBusy}
+                onClick={() => onFeedback(item.id, { expectedVerdict, expectedDefects, note: feedbackNote })}
+                className="btn btn-primary mt-2 w-full py-2 text-xs disabled:opacity-50"
+              >
+                Geri bildirimi kaydet
+              </button>
+            </div>
+          )}
+
           <div className="mt-5 pt-4 border-t border-[var(--border)] flex gap-2">
-            <a href={item.overlaySrc} download={`${item.filename}_analiz.jpg`} className="btn btn-outline text-xs flex-1 py-2">Analizi İndir</a>
-            <a href={item.originalSrc} download={item.filename} className="btn btn-outline text-xs flex-1 py-2">Orijinali İndir</a>
+            <a href={item.overlaySrc} download={`${item.filename}_analiz.jpg`} className="btn btn-outline text-xs flex-1 py-2">Analizi indir</a>
+            <a href={item.originalSrc} download={item.filename} className="btn btn-outline text-xs flex-1 py-2">Orijinali indir</a>
           </div>
           {(onReprocess || onDelete) && (
             <div className="mt-2 flex gap-2">
@@ -186,3 +253,13 @@ export function DetailModal({
     </div>
   );
 }
+
+const DEFECT_OPTIONS = [
+  { type: "edge_damage", label: "Kenar" },
+  { type: "deformation", label: "Deformasyon" },
+  { type: "glass_burn", label: "Cam yanığı" },
+  { type: "raw_fiber", label: "Cam/çiğ elyaf" },
+  { type: "color_anomaly", label: "Renk/Leke" },
+  { type: "dark_crack", label: "Çatlak" },
+  { type: "local_anomaly", label: "Yerel anomali" },
+];
