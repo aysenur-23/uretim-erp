@@ -9,22 +9,32 @@ export function CameraPanel({ onCapture, busy }: { onCapture: (blob: Blob, filen
   async function start() {
     setErr(null);
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 } }, audio: false });
-      setStream(s);
-      if (videoRef.current) { videoRef.current.srcObject = s; await videoRef.current.play(); }
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "kamera erişilemiyor");
+      const nextStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 } }, audio: false });
+      setStream(nextStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = nextStream;
+        await videoRef.current.play();
+      }
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : "Kamera erişimi sağlanamadı.");
     }
   }
-  function stop() { stream?.getTracks().forEach((t) => t.stop()); setStream(null); }
+
+  function stop() {
+    stream?.getTracks().forEach((track) => track.stop());
+    setStream(null);
+  }
+
   useEffect(() => () => stop(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function snap() {
-    const v = videoRef.current; if (!v || !stream) return;
-    const c = document.createElement("canvas");
-    c.width = v.videoWidth; c.height = v.videoHeight;
-    c.getContext("2d")!.drawImage(v, 0, 0);
-    const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/jpeg", 0.9));
+    const video = videoRef.current;
+    if (!video || !stream) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")!.drawImage(video, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
     if (!blob) return;
     await onCapture(blob, "kamera.jpg");
   }
@@ -40,7 +50,7 @@ export function CameraPanel({ onCapture, busy }: { onCapture: (blob: Blob, filen
           <button onClick={start} className="btn btn-primary">Kamerayı Aç</button>
         ) : (
           <>
-            <button onClick={snap} className="btn btn-primary" disabled={busy}>Çek ve Analiz Et</button>
+            <button onClick={snap} className="btn btn-primary" disabled={busy}>Görüntüyü Analiz Et</button>
             <button onClick={stop} className="btn btn-outline">Kapat</button>
           </>
         )}

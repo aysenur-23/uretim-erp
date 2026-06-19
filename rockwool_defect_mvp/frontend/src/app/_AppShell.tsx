@@ -77,8 +77,8 @@ export default function AppShell({
   }, [reload]);
 
   const refLabel = useMemo(() => {
-    if (!reference) return "Referans: varsayılan (henüz KABUL örneği yok)";
-    return `Referans: ${reference.n} KABUL örneği · H${reference.meanH.toFixed(0)}° / S${reference.meanS.toFixed(0)}% / V${reference.meanV.toFixed(0)}%`;
+    if (!reference) return "Ön çalışma";
+    return `${reference.n} kabul örneği ile ön kalibrasyon`;
   }, [reference]);
 
   function openDetail(id: string) {
@@ -226,9 +226,9 @@ export default function AppShell({
             <div>
               <div className="inline-block text-xs font-semibold tracking-wider bg-[var(--mega-red)] px-3 py-1 rounded-full">MEGA INSULATION SOLUTIONS</div>
               <h1 className="text-3xl md:text-4xl font-bold mt-3">Taş yünü kalite kontrol</h1>
-              <p className="text-white/80 mt-1 text-sm md:text-base">Önce plaka tespit edilir, sonra her hata kendine özel algoritmayla aranır.</p>
+              <p className="text-white/80 mt-1 text-sm md:text-base">Görüntü tabanlı kalite kontrol için hazırlanmış ön çalışma ekranı.</p>
             </div>
-            <button onClick={() => setSettingsOpen(true)} className="text-xs text-white/80 hover:text-white underline">Ayarlar →</button>
+            <button onClick={() => setSettingsOpen(true)} className="text-xs text-white/80 hover:text-white underline">Ön çalışma notu</button>
           </div>
 
           <div className="card p-2">
@@ -251,7 +251,7 @@ export default function AppShell({
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div>
             <h2 className="text-2xl font-bold text-[var(--mega-navy)]">Galeri</h2>
-            <p className="text-sm text-[var(--text-muted)]">Tüm kullanıcıların analizleri · işaretler görsel üzerinde</p>
+            <p className="text-sm text-[var(--text-muted)]">Pilot analiz sonuçları</p>
           </div>
           <div className="flex gap-2">
             <Stat label="Toplam" value={stats.total} color="text-[var(--mega-navy)]" />
@@ -272,7 +272,7 @@ export default function AppShell({
           ))}
         </div>
         {pendingCards.length + storedCards.length === 0 ? (
-          <div className="card p-10 text-center text-[var(--text-muted)]">Henüz analiz yok - üstten yükle.</div>
+          <div className="card p-10 text-center text-[var(--text-muted)]">Henüz analiz yok.</div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {pendingCards.map((card) => <ResultCard key={card.id} item={card} />)}

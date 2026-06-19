@@ -34,7 +34,6 @@ export type DetailItem = {
   roiConfidence?: number;
   defects: DefectDetail[];
   pipeline?: PipelineStep[];
-  createdAt?: number;
   metrics?: {
     meanH: number;
     meanS: number;
@@ -88,7 +87,6 @@ export function DetailModal({
 
   if (!item) return null;
 
-  const m = item.metrics;
   const severityClass = (severity: string) =>
     severity === "high"
       ? "bg-red-100 text-red-700"
@@ -122,13 +120,13 @@ export function DetailModal({
               <div className="font-semibold truncate" title={item.filename}>{item.filename}</div>
               <div className="text-[11px] text-[var(--text-muted)]">{item.source === "camera" ? "Kamera" : "Yükleme"}</div>
             </div>
-            <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] text-xl leading-none" aria-label="Kapat">×</button>
+            <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] text-xl leading-none" aria-label="Kapat">x</button>
           </div>
 
           <div className="mt-3">
-            <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Tespitler</h3>
+            <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Bulgular</h3>
             {item.defects.length === 0 ? (
-              <p className="text-sm text-emerald-700">Tespit edilen hata yok.</p>
+              <p className="text-sm text-emerald-700">Belirgin hata tespit edilmedi.</p>
             ) : (
               <ul className="space-y-2">
                 {item.defects.map((defect) => (
@@ -141,50 +139,15 @@ export function DetailModal({
                       <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${severityClass(defect.severity)}`}>%{defect.confidence ?? defect.score}</span>
                     </div>
                     {defect.category && <div className="mt-1 text-[11px] uppercase tracking-wider text-[var(--text-muted)]">{defect.category}</div>}
-                    {defect.description && <p className="mt-2 text-xs text-[var(--text-muted)]">{defect.description}</p>}
-                    {defect.reason && <p className="mt-2 text-xs text-[var(--text)]"><span className="font-semibold">Neden:</span> {defect.reason}</p>}
-                    {defect.strategy && <p className="mt-2 text-xs text-[var(--text)]"><span className="font-semibold">Strateji:</span> {defect.strategy}</p>}
-                    {defect.decisionImpact && <p className="mt-1 text-[11px] text-[var(--text-muted)]">{defect.decisionImpact}</p>}
                   </li>
                 ))}
               </ul>
             )}
           </div>
 
-          {item.pipeline && item.pipeline.length > 0 && (
-            <div className="mt-5">
-              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Analiz hattı</h3>
-              <ol className="space-y-2">
-                {item.pipeline.map((step) => (
-                  <li key={step.key} className="rounded-lg bg-slate-50 px-3 py-2">
-                    <div className="text-xs font-semibold text-[var(--text)]">{step.label}</div>
-                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">{step.description}</div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-
-          {m && (
-            <div className="mt-5">
-              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Ham metrikler</h3>
-              <dl className="text-xs grid grid-cols-2 gap-x-3 gap-y-1.5 text-[var(--text-muted)]">
-                <dt>ROI confidence</dt><dd className="text-right text-[var(--text)] tabular-nums">%{((item.roiConfidence ?? 0) * 100).toFixed(1)}</dd>
-                <dt>Plaka medyan H</dt><dd className="text-right text-[var(--text)] tabular-nums">{m.meanH.toFixed(1)}°</dd>
-                <dt>Plaka medyan S</dt><dd className="text-right text-[var(--text)] tabular-nums">{m.meanS.toFixed(1)}%</dd>
-                <dt>Plaka medyan V</dt><dd className="text-right text-[var(--text)] tabular-nums">{m.meanV.toFixed(1)}%</dd>
-                <dt>Açık leke oranı</dt><dd className="text-right text-[var(--text)] tabular-nums">{(m.brightSpotRatio * 100).toFixed(2)}%</dd>
-                <dt>Koyu leke oranı</dt><dd className="text-right text-[var(--text)] tabular-nums">{(m.darkSpotRatio * 100).toFixed(2)}%</dd>
-                <dt>Çatlak uzunluk</dt><dd className="text-right text-[var(--text)] tabular-nums">{(m.longLineScore * 100).toFixed(1)}%</dd>
-                <dt>Dikdörtgensellik</dt><dd className="text-right text-[var(--text)] tabular-nums">{(m.rectangularity * 100).toFixed(1)}%</dd>
-                <dt>Gönye sapma</dt><dd className="text-right text-[var(--text)] tabular-nums">{m.squarenessDeg.toFixed(2)}°</dd>
-              </dl>
-            </div>
-          )}
-
           {onFeedback && (
             <div className="mt-5 rounded-lg border border-[var(--border)] p-3">
-              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Operatör geri bildirimi</h3>
+              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Doğrulama</h3>
               <label className="text-xs text-[var(--text-muted)]">Beklenen karar</label>
               <select
                 value={expectedVerdict}
@@ -202,7 +165,7 @@ export function DetailModal({
                     checked={roiOk}
                     onChange={(event) => setRoiOk(event.target.checked)}
                   />
-                  Ürün bbox/ROI doğru
+                  Ürün çerçevesi doğru
                 </label>
                 {DEFECT_OPTIONS.map((option) => (
                   <label key={option.type} className="flex items-center gap-2">
@@ -231,7 +194,7 @@ export function DetailModal({
                 onClick={() => onFeedback(item.id, { expectedVerdict, expectedDefects, roiOk, note: feedbackNote })}
                 className="btn btn-primary mt-2 w-full py-2 text-xs disabled:opacity-50"
               >
-                Geri bildirimi kaydet
+                Doğrulamayı kaydet
               </button>
             </div>
           )}
