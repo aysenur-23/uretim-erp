@@ -49,7 +49,7 @@ def find_product_roi(image: np.ndarray, config: AppConfig) -> ProductROI | None:
     rotated_box = _rotated_box_points(contour)
     shape_mask = _mask_from_rotated_box(image.shape, rotated_box)
     shape_mask = _refine_shape_mask_by_panel_color(image, shape_mask, config)
-    shape_mask = _snap_shape_mask_to_panel_edges(image, shape_mask)
+    shape_mask = _snap_shape_mask_to_panel_edges(image, shape_mask, config)
     rotated_box = _box_from_mask(shape_mask) or rotated_box
     shape_bbox, shape_roi, shape_mask_roi = _extract_shape_roi(image, shape_mask)
     contour_area = float(cv2.contourArea(contour))
@@ -309,7 +309,7 @@ def _refine_shape_mask_by_panel_color(
     return refined
 
 
-def _snap_shape_mask_to_panel_edges(image: np.ndarray, shape_mask: np.ndarray) -> np.ndarray:
+def _snap_shape_mask_to_panel_edges(image: np.ndarray, shape_mask: np.ndarray, config: AppConfig) -> np.ndarray:
     shape_bbox, _, _ = _extract_shape_roi(image, shape_mask)
     x, y, width, height = shape_bbox
     if width < 30 or height < 30:
@@ -320,18 +320,21 @@ def _snap_shape_mask_to_panel_edges(image: np.ndarray, shape_mask: np.ndarray) -
     edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 45, 130)
     edge_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     edges = cv2.dilate(edges, edge_kernel, iterations=1)
+    color_col_boundary, color_row_boundary, color_mask = _panel_color_boundary_profiles(image, config)
 
     x_pad = max(10, int(width * 0.18))
     y_pad = max(10, int(height * 0.18))
-    left = _snap_side_from_profile(edges.mean(axis=0), x, x_pad, image_width, prefer="left")
-    right = _snap_side_from_profile(edges.mean(axis=0), x + width - 1, x_pad, image_width, prefer="right")
-    top = _snap_side_from_profile(edges.mean(axis=1), y, y_pad, image_height, prefer="left")
-    bottom = _snap_side_from_profile(edges.mean(axis=1), y + height - 1, y_pad, image_height, prefer="right")
+    col_profile = edges.mean(axis=0).astype(np.float32) + color_col_boundary
+    row_profile = edges.mean(axis=1).astype(np.float32) + color_row_boundary
+    left = _snap_side_from_profile(col_profile, x, x_pad, image_width, prefer="left")
+    right = _snap_side_from_profile(col_profile, x + width - 1, x_pad, image_width, prefer="right")
+    top = _snap_side_from_profile(row_profile, y, y_pad, image_height, prefer="left")
+    bottom = _snap_side_from_profile(row_profile, y + height - 1, y_pad, image_height, prefer="right")
 
-    nx1 = min(left if left is not None else x, x)
-    ny1 = min(top if top is not None else y, y)
-    nx2 = max(right if right is not None else x + width - 1, x + width - 1)
-    ny2 = max(bottom if bottom is not None else y + height - 1, y + height - 1)
+    nx1 = left if left is not None else x
+    ny1 = top if top is not None else y
+    nx2 = right if right is not None else x + width - 1
+    ny2 = bottom if bottom is not None else y + height - 1
     new_width = nx2 - nx1 + 1
     new_height = ny2 - ny1 + 1
     if new_width <= 0 or new_height <= 0:
@@ -339,16 +342,66 @@ def _snap_shape_mask_to_panel_edges(image: np.ndarray, shape_mask: np.ndarray) -
 
     old_area = float(width * height)
     new_area = float(new_width * new_height)
-    if new_area > old_area * 1.28 or new_area < old_area * 0.98:
+    if new_area > old_area * 1.20 or new_area < old_area * 0.70:
         return shape_mask
 
     movement = abs(nx1 - x) + abs(ny1 - y) + abs(nx2 - (x + width - 1)) + abs(ny2 - (y + height - 1))
     if movement < 3:
         return shape_mask
+    if max(abs(nx1 - x), abs(nx2 - (x + width - 1))) > x_pad or max(abs(ny1 - y), abs(ny2 - (y + height - 1))) > y_pad:
+        return shape_mask
+    if not _inward_snap_keeps_product_color(color_mask, (x, y, width, height), (nx1, ny1, new_width, new_height)):
+        return shape_mask
 
     snapped = np.zeros_like(shape_mask)
     cv2.rectangle(snapped, (nx1, ny1), (nx2, ny2), 255, -1)
     return snapped
+
+
+def _panel_color_boundary_profiles(image: np.ndarray, config: AppConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    lower = np.array(config.product_hsv_lower, dtype=np.uint8)
+    upper = np.array(config.product_hsv_upper, dtype=np.uint8)
+    color_mask = cv2.inRange(hsv, lower, upper)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (13, 13))
+    color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    col_density = _smooth_profile((color_mask > 0).mean(axis=0).astype(np.float32), 17)
+    row_density = _smooth_profile((color_mask > 0).mean(axis=1).astype(np.float32), 17)
+    col_boundary = np.abs(np.gradient(col_density)) * 180.0
+    row_boundary = np.abs(np.gradient(row_density)) * 180.0
+    return col_boundary.astype(np.float32), row_boundary.astype(np.float32), color_mask
+
+
+def _inward_snap_keeps_product_color(
+    color_mask: np.ndarray,
+    old_bbox: tuple[int, int, int, int],
+    new_bbox: tuple[int, int, int, int],
+) -> bool:
+    old_x, old_y, old_width, old_height = old_bbox
+    new_x, new_y, new_width, new_height = new_bbox
+    old_right = old_x + old_width - 1
+    old_bottom = old_y + old_height - 1
+    new_right = new_x + new_width - 1
+    new_bottom = new_y + new_height - 1
+
+    removed_strips: list[np.ndarray] = []
+    if new_x > old_x:
+        removed_strips.append(color_mask[old_y : old_y + old_height, old_x:new_x])
+    if new_right < old_right:
+        removed_strips.append(color_mask[old_y : old_y + old_height, new_right + 1 : old_right + 1])
+    if new_y > old_y:
+        removed_strips.append(color_mask[old_y:new_y, old_x : old_x + old_width])
+    if new_bottom < old_bottom:
+        removed_strips.append(color_mask[new_bottom + 1 : old_bottom + 1, old_x : old_x + old_width])
+
+    for strip in removed_strips:
+        if strip.size == 0:
+            continue
+        if float((strip > 0).mean()) >= 0.16:
+            return False
+    return True
 
 
 def _snap_side_from_profile(
@@ -374,11 +427,17 @@ def _snap_side_from_profile(
     if local_max < 24.0 or local_prominence < 18.0:
         return None
 
-    threshold = local_median + local_prominence * 0.72
+    threshold = local_median + local_prominence * 0.68
     candidates = np.where(window >= threshold)[0]
     if candidates.size == 0:
         return None
-    index = int(candidates[0] if prefer == "left" else candidates[-1])
+    absolute_candidates = candidates + start
+    scores = window[candidates] - np.abs(absolute_candidates - side) * 0.18
+    if prefer == "left":
+        scores = scores - np.maximum(absolute_candidates - side, 0) * 0.04
+    else:
+        scores = scores - np.maximum(side - absolute_candidates, 0) * 0.04
+    index = int(candidates[int(np.argmax(scores))])
     return start + index
 
 

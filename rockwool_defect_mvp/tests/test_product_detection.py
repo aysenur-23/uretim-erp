@@ -58,6 +58,25 @@ class ProductDetectionTests(unittest.TestCase):
         self.assertGreaterEqual(width, 500)
         self.assertGreaterEqual(height, 235)
 
+    def test_bbox_keeps_colored_panel_when_internal_edges_are_strong(self) -> None:
+        image = np.full((460, 360, 3), 30, dtype=np.uint8)
+        cv2.rectangle(image, (55, 35), (310, 425), (138, 165, 128), -1)
+        cv2.rectangle(image, (55, 35), (310, 425), (210, 220, 190), 4)
+        for x in (120, 180, 245):
+            cv2.line(image, (x, 45), (x, 415), (70, 85, 65), 6)
+        for y in range(60, 405, 18):
+            cv2.line(image, (70, y), (295, y), (165, 185, 145), 2)
+
+        product = find_product_roi(image, load_config())
+
+        self.assertIsNotNone(product)
+        assert product is not None
+        x, y, width, height = product.shape_bbox
+        self.assertLessEqual(abs(x - 55), 20)
+        self.assertLessEqual(abs(y - 35), 20)
+        self.assertGreaterEqual(width, 235)
+        self.assertGreaterEqual(height, 365)
+
     def test_tall_textured_panel_uses_full_height_frame(self) -> None:
         image_path = Path("data/raw/20260619_003206_116660_upload_defects_image8.jpeg")
         if not image_path.exists():
