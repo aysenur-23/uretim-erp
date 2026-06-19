@@ -12,6 +12,7 @@ from src.vision.defect_rules import (
     detect_glass_burn,
     detect_raw_fiber,
 )
+from src.vision.product_detection import _refine_shape_mask_by_panel_color
 
 
 class DefectRulesTests(unittest.TestCase):
@@ -60,6 +61,34 @@ class DefectRulesTests(unittest.TestCase):
         self.assertTrue(result["is_suspicious"])
         self.assertGreater(result["display_crack_area_ratio"], result["crack_area_ratio"])
         self.assertLess(result["display_crack_area_ratio"] - result["crack_area_ratio"], 0.01)
+
+    def test_crack_overlay_adds_independent_faint_cracks_on_cracked_panel(self) -> None:
+        roi = np.full((380, 270, 3), (110, 140, 92), dtype=np.uint8)
+        for x in (52, 116, 196):
+            cv2.line(roi, (x, 35), (x + 9, 330), (34, 48, 30), 3)
+        for x in (82, 154, 226):
+            for y in range(70, 300, 34):
+                cv2.line(roi, (x, y), (x + 5, y + 18), (58, 76, 48), 2)
+
+        result = detect_dark_crack_like_regions(roi, roi, load_config())
+
+        self.assertTrue(result["is_suspicious"])
+        self.assertGreater(result["display_crack_area_ratio"], result["crack_area_ratio"])
+        self.assertLess(result["display_crack_area_ratio"] - result["crack_area_ratio"], 0.02)
+
+    def test_product_color_refinement_does_not_crop_mixed_color_panel(self) -> None:
+        config = load_config()
+        image = np.full((240, 140, 3), (92, 92, 78), dtype=np.uint8)
+        image[18:222, 22:118] = (84, 110, 82)
+        image[118:222, 22:118] = (92, 150, 104)
+        mask = np.zeros((240, 140), dtype=np.uint8)
+        cv2.rectangle(mask, (22, 18), (117, 221), 255, -1)
+
+        refined = _refine_shape_mask_by_panel_color(image, mask, config)
+
+        original_area = cv2.countNonZero(mask)
+        refined_area = cv2.countNonZero(refined)
+        self.assertGreaterEqual(refined_area, original_area * 0.78)
 
     def test_regular_dense_fiber_texture_is_not_crack(self) -> None:
         roi = np.full((360, 520, 3), (150, 168, 135), dtype=np.uint8)

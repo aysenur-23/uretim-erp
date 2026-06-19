@@ -282,17 +282,21 @@ def _refine_shape_mask_by_panel_color(
         return shape_mask
 
     refined = shape_mask.copy()
+    original_area = float(cv2.countNonZero(refined))
     if row_range is not None:
         start, end = row_range
-        if (end - start + 1) >= height * 0.55:
+        if (end - start + 1) >= height * 0.72:
             refined[: y + start, :] = 0
             refined[y + end + 1 :, :] = 0
 
     if col_range is not None:
         start, end = col_range
-        if (end - start + 1) >= width * 0.55:
+        if (end - start + 1) >= width * 0.72:
             refined[:, : x + start] = 0
             refined[:, x + end + 1 :] = 0
+
+    if original_area > 0 and cv2.countNonZero(refined) < original_area * 0.78:
+        refined = shape_mask.copy()
 
     if panel_ratio >= 0.08:
         color_mask = np.zeros_like(shape_mask)
@@ -303,7 +307,10 @@ def _refine_shape_mask_by_panel_color(
         color_mask[y : y + height, x : x + width] = crop_color_mask
         expanded = cv2.dilate(color_mask, kernel, iterations=1)
         candidate = cv2.bitwise_and(refined, expanded)
-        if _largest_area_ratio(candidate) >= _largest_area_ratio(refined) * 0.55:
+        if (
+            _largest_area_ratio(candidate) >= _largest_area_ratio(refined) * 0.55
+            and cv2.countNonZero(candidate) >= max(1, cv2.countNonZero(refined)) * 0.82
+        ):
             refined = candidate
 
     return refined

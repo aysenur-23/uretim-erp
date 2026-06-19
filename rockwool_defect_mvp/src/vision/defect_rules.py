@@ -396,6 +396,16 @@ def detect_dark_crack_like_regions(image: np.ndarray, roi: np.ndarray, config: A
             )
         )
     )
+    if is_suspicious and crack_stats["component_count"] >= 3:
+        independent_fine_mask = _independent_fine_crack_mask(weak_crack_mask, seed_crack_mask, valid_mask)
+        expanded_display_mask = cv2.bitwise_or(display_crack_mask, independent_fine_mask)
+        expanded_area = float(cv2.countNonZero(expanded_display_mask))
+        expanded_area_ratio = (expanded_area / valid_area) if valid_area else 0.0
+        allowed_area_ratio = min(0.040, crack_area_ratio + 0.022)
+        if expanded_area_ratio <= allowed_area_ratio:
+            display_crack_mask = expanded_display_mask
+            display_crack_area = expanded_area
+            display_crack_area_ratio = expanded_area_ratio
 
     return {
         **_result(
@@ -531,6 +541,64 @@ def _secondary_crack_component_mask(
         if fill_ratio > 0.55 and thickness_ratio > 0.045:
             continue
         if length_ratio < 0.035:
+            continue
+        output[labels == label] = 255
+    return output
+
+
+def _independent_fine_crack_mask(
+    candidate_mask: np.ndarray,
+    seed_mask: np.ndarray,
+    valid_mask: np.ndarray,
+) -> np.ndarray:
+    candidates = cv2.bitwise_and(candidate_mask, valid_mask)
+    if cv2.countNonZero(candidates) == 0:
+        return np.zeros_like(candidate_mask, dtype=np.uint8)
+
+    candidates = cv2.bitwise_and(candidates, cv2.bitwise_not(seed_mask))
+    candidates = cv2.morphologyEx(
+        candidates,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)),
+        iterations=1,
+    )
+    candidates = cv2.morphologyEx(
+        candidates,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (2, 13)),
+        iterations=1,
+    )
+
+    output = np.zeros_like(candidate_mask)
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(candidates, connectivity=8)
+    image_height = max(1, candidate_mask.shape[0])
+    image_width = max(1, candidate_mask.shape[1])
+    min_dimension = max(1, min(image_height, image_width))
+
+    for label in range(1, component_count):
+        x, y, width, height, area = stats[label]
+        if area < 7:
+            continue
+        long_side = max(width, height)
+        short_side = max(1, min(width, height))
+        aspect_ratio = long_side / float(short_side)
+        fill_ratio = area / float(max(1, width * height))
+        thickness_ratio = short_side / float(min_dimension)
+        height_ratio = height / float(image_height)
+        relative_area = area / float(max(1, candidate_mask.size))
+        touches_border = (
+            x <= 1
+            or y <= 1
+            or x + width >= image_width - 1
+            or y + height >= image_height - 1
+        )
+        if touches_border:
+            continue
+        if height_ratio < 0.055:
+            continue
+        if aspect_ratio < 2.6 and height < width * 1.55:
+            continue
+        if fill_ratio > 0.66 or thickness_ratio > 0.075 or relative_area > 0.020:
             continue
         output[labels == label] = 255
     return output
