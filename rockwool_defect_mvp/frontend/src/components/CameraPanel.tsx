@@ -26,7 +26,7 @@ export function CameraPanel({ onCapture, busy }: { onCapture: (blob: Blob, filen
     c.getContext("2d")!.drawImage(v, 0, 0);
     const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/jpeg", 0.9));
     if (!blob) return;
-    await onCapture(blob, `kamera_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`);
+    await onCapture(blob, "kamera.jpg");
   }
 
   return (

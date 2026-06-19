@@ -14,9 +14,17 @@ type DefectMetric = {
 type CalibrationMetrics = {
   feedbackCount: number;
   verdictAccuracy: number;
+  roiFeedback?: {
+    total: number;
+    ok: number;
+    bad: number;
+    accuracy: number;
+    avgConfidence: number;
+  };
   perDefect: DefectMetric[];
   mismatches: {
     recordId: number;
+    roiOk?: boolean;
     expectedVerdict: string;
     predictedVerdict: string;
     falsePositive: string[];
@@ -44,7 +52,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       <div className="card w-full max-w-3xl p-6 max-h-[92vh] overflow-y-auto" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-[var(--mega-navy)]">Kalibrasyon ve analiz ayarları</h2>
-          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] text-xl leading-none" aria-label="Kapat">×</button>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] text-xl leading-none" aria-label="Kapat">x</button>
         </div>
 
         <div className="grid gap-4 text-sm text-[var(--text-muted)]">
@@ -53,14 +61,30 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             <ul className="grid gap-1">
               <li>Görsel veya kamera karesi FastAPI backend'e gönderilir.</li>
               <li>Önce ROI/bbox confidence hesaplanır, sonra hata kuralları ayrı ayrı çalışır.</li>
-              <li>Operatör geri bildirimi FP/FN metriklerine dönüştürülür.</li>
+              <li>Operatör geri bildirimi ROI doğrulaması ve FP/FN metriklerine dönüştürülür.</li>
               <li>VLM sadece açıklama ve rapor tarafında konumlandırılır; karar motorunun yerine geçmez.</li>
             </ul>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MetricCard label="Feedback" value={metrics ? String(metrics.feedbackCount) : "-"} />
             <MetricCard label="Karar doğruluğu" value={metrics ? `%${(metrics.verdictAccuracy * 100).toFixed(1)}` : "-"} />
+            <MetricCard label="ROI onayı" value={metrics ? `%${((metrics.roiFeedback?.accuracy ?? 1) * 100).toFixed(1)}` : "-"} />
+            <MetricCard label="ROI red" value={metrics ? String(metrics.roiFeedback?.bad ?? 0) : "-"} />
+          </div>
+
+          <div className="rounded-lg border border-[var(--border)] bg-white p-4">
+            <div className="font-semibold text-[var(--mega-navy)] mb-2">Genel bbox kalibrasyonu</div>
+            <p className="text-xs leading-relaxed">
+              Ürün çerçevesi her yeni görselde renk profili, kenar yoğunluğu ve dikdörtgenlik sinyaliyle hesaplanır.
+              Operatörün "Ürün bbox/ROI doğru" doğrulaması bu alanın gerçek sahada ne kadar güvenilir olduğunu ölçer.
+              ROI red sayısı arttığında eşik ve snap kuralları görüntüye özel değil, genel kalibrasyon olarak güncellenir.
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+              <div className="rounded bg-slate-50 p-2">Toplam: <b>{metrics?.roiFeedback?.total ?? 0}</b></div>
+              <div className="rounded bg-emerald-50 p-2 text-emerald-700">Doğru: <b>{metrics?.roiFeedback?.ok ?? 0}</b></div>
+              <div className="rounded bg-red-50 p-2 text-red-700">Yanlış: <b>{metrics?.roiFeedback?.bad ?? 0}</b></div>
+            </div>
           </div>
 
           <div className="rounded-lg border border-[var(--border)] overflow-hidden">

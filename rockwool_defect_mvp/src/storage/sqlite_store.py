@@ -87,6 +87,7 @@ class SQLiteStore:
                     CREATE TABLE IF NOT EXISTS operator_feedback (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         record_id INTEGER NOT NULL,
+                        roi_ok INTEGER NOT NULL DEFAULT 1,
                         expected_verdict TEXT NOT NULL,
                         expected_defects TEXT NOT NULL DEFAULT '[]',
                         note TEXT NOT NULL DEFAULT '',
@@ -95,6 +96,7 @@ class SQLiteStore:
                     )
                     """
                 )
+                self._ensure_column(connection, "roi_ok", "INTEGER NOT NULL DEFAULT 1", table="operator_feedback")
 
     def insert_inspection_record(self, record: dict[str, Any]) -> int:
         columns = INSPECTION_COLUMNS
@@ -239,6 +241,7 @@ class SQLiteStore:
     def insert_operator_feedback(
         self,
         record_id: int,
+        roi_ok: bool,
         expected_verdict: str,
         expected_defects: str,
         note: str,
@@ -250,13 +253,14 @@ class SQLiteStore:
                     """
                     INSERT INTO operator_feedback (
                         record_id,
+                        roi_ok,
                         expected_verdict,
                         expected_defects,
                         note,
                         created_at
-                    ) VALUES (?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (int(record_id), expected_verdict, expected_defects, note, created_at),
+                    (int(record_id), int(roi_ok), expected_verdict, expected_defects, note, created_at),
                 )
                 return int(cursor.lastrowid)
 
@@ -269,12 +273,14 @@ class SQLiteStore:
                 SELECT
                     feedback.id,
                     feedback.record_id,
+                    feedback.roi_ok,
                     feedback.expected_verdict,
                     feedback.expected_defects,
                     feedback.note,
                     feedback.created_at,
                     records.model_result,
                     records.anomaly_score,
+                    records.roi_confidence,
                     records.edge_damage_score,
                     records.deformation_score,
                     records.color_anomaly_score,
@@ -396,10 +402,17 @@ class SQLiteStore:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)
 
-    def _ensure_column(self, connection: sqlite3.Connection, column: str, definition: str) -> None:
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        column: str,
+        definition: str,
+        *,
+        table: str = "inspection_records",
+    ) -> None:
         existing_columns = {
             row[1]
-            for row in connection.execute("PRAGMA table_info(inspection_records)").fetchall()
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
         }
         if column not in existing_columns:
-            connection.execute(f"ALTER TABLE inspection_records ADD COLUMN {column} {definition}")
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

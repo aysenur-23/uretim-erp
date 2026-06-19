@@ -35,6 +35,7 @@ app.add_middleware(
 class FeedbackPayload(BaseModel):
     expectedVerdict: str
     expectedDefects: list[str] = []
+    roiOk: bool = True
     note: str = ""
 
 
@@ -165,6 +166,7 @@ def save_feedback(record_id: int, payload: FeedbackPayload) -> dict[str, Any]:
     expected_defects = sorted({item for item in payload.expectedDefects if item in known_defects})
     feedback_id = store.insert_operator_feedback(
         record_id=record_id,
+        roi_ok=payload.roiOk,
         expected_verdict=expected_verdict,
         expected_defects=json.dumps(expected_defects, ensure_ascii=False),
         note=payload.note.strip()[:500],
@@ -174,7 +176,8 @@ def save_feedback(record_id: int, payload: FeedbackPayload) -> dict[str, Any]:
         record_id,
         operator_label=_operator_label_from_feedback(expected_verdict, expected_defects),
         operator_note=payload.note.strip()[:500],
-        is_model_wrong=_model_to_ui_verdict(record.get("model_result")) != expected_verdict
+        is_model_wrong=(not payload.roiOk)
+        or _model_to_ui_verdict(record.get("model_result")) != expected_verdict
         or set(_defect_types_from_record(record)) != set(expected_defects),
     )
     metrics = _calibration_metrics(store.fetch_operator_feedback(limit=1000))
@@ -328,7 +331,7 @@ def _record_to_item(record: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "id": record_id,
         "created_at": _timestamp_to_epoch_ms(record.get("timestamp")),
-        "filename": f"#{record_id} - {_display_timestamp(record.get('timestamp'))} - {verdict}",
+        "filename": f"#{record_id} - {verdict}",
         "source": source,
         "verdict": verdict,
         "confidence": confidence,
@@ -339,7 +342,7 @@ def _record_to_item(record: dict[str, Any] | None) -> dict[str, Any]:
         "originalSrc": f"/api/images/{record_id}?v=raw",
         "overlaySrc": f"/api/images/{record_id}?v=overlay",
         "previousOverlaySrc": f"/api/images/{record_id}?v=previous" if record.get("previous_overlay_path") else None,
-        "meta": f"{_display_timestamp(record.get('timestamp'))} · {'Kamera' if source == 'camera' else 'Yükleme'}",
+        "meta": "Kamera" if source == "camera" else "Yükleme",
     }
 
 
@@ -430,12 +433,17 @@ def _calibration_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     defect_keys = [meta.defect_type for meta in ordered_defects()]
     per_defect = {key: {"tp": 0, "fp": 0, "fn": 0} for key in defect_keys}
     verdict = {"total": 0, "correct": 0}
+    roi = {"total": 0, "ok": 0, "bad": 0, "confidence_sum": 0.0}
     mismatches = []
 
     for row in rows:
         if not row.get("model_result"):
             continue
         verdict["total"] += 1
+        roi["total"] += 1
+        roi_ok = bool(row.get("roi_ok", 1))
+        roi["ok" if roi_ok else "bad"] += 1
+        roi["confidence_sum"] += float(row.get("roi_confidence") or 0.0)
         expected_verdict = str(row.get("expected_verdict") or "")
         predicted_verdict = _model_to_ui_verdict(row.get("model_result"))
         if expected_verdict == predicted_verdict:
@@ -453,10 +461,11 @@ def _calibration_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
             elif defect in expected_defects and defect not in predicted_defects:
                 per_defect[defect]["fn"] += 1
 
-        if expected_verdict != predicted_verdict or false_positive or false_negative:
+        if (not roi_ok) or expected_verdict != predicted_verdict or false_positive or false_negative:
             mismatches.append(
                 {
                     "recordId": row.get("record_id"),
+                    "roiOk": roi_ok,
                     "expectedVerdict": expected_verdict,
                     "predictedVerdict": predicted_verdict,
                     "falsePositive": false_positive,
@@ -484,9 +493,18 @@ def _calibration_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         )
 
     accuracy = verdict["correct"] / verdict["total"] if verdict["total"] else 1.0
+    roi_accuracy = roi["ok"] / roi["total"] if roi["total"] else 1.0
+    avg_roi_confidence = roi["confidence_sum"] / roi["total"] if roi["total"] else 0.0
     return {
         "feedbackCount": verdict["total"],
         "verdictAccuracy": round(accuracy, 3),
+        "roiFeedback": {
+            "total": roi["total"],
+            "ok": roi["ok"],
+            "bad": roi["bad"],
+            "accuracy": round(roi_accuracy, 3),
+            "avgConfidence": round(avg_roi_confidence, 3),
+        },
         "perDefect": per_defect_metrics,
         "mismatches": mismatches[:50],
         "nextPhases": [

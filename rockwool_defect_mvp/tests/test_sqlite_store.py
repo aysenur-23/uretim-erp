@@ -39,6 +39,7 @@ class SQLiteStoreTests(unittest.TestCase):
             missing_rows = store.fetch_recent_inspection_records(limit=10, model_result="HATALI")
             feedback_id = store.insert_operator_feedback(
                 record_id,
+                False,
                 "RED",
                 '["dark_crack"]',
                 "visible crack",
@@ -76,6 +77,7 @@ class SQLiteStoreTests(unittest.TestCase):
         self.assertEqual(feedback_id, 1)
         self.assertEqual(len(feedback_rows), 1)
         self.assertEqual(feedback_rows[0]["record_id"], record_id)
+        self.assertEqual(feedback_rows[0]["roi_ok"], 0)
         self.assertEqual(feedback_rows[0]["expected_verdict"], "RED")
         self.assertTrue(updated)
         self.assertTrue(model_updated)

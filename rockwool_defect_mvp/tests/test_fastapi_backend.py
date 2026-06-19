@@ -75,6 +75,7 @@ class FastApiBackendTests(unittest.TestCase):
                         json={
                             "expectedVerdict": "KABUL",
                             "expectedDefects": [],
+                            "roiOk": True,
                             "note": "operator check",
                         },
                     )
@@ -83,6 +84,7 @@ class FastApiBackendTests(unittest.TestCase):
                     self.assertEqual(metrics_response.status_code, 200)
                     metrics = metrics_response.json()
                     self.assertEqual(metrics["feedbackCount"], 1)
+                    self.assertEqual(metrics["roiFeedback"]["ok"], 1)
                     self.assertIn("perDefect", metrics)
 
                     image_response = client.get(f"/api/images/{record_id}?v=overlay")

@@ -166,7 +166,7 @@ export default function AppShell({
     }
   }
 
-  async function saveFeedback(id: string, payload: { expectedVerdict: string; expectedDefects: string[]; note: string }) {
+  async function saveFeedback(id: string, payload: { expectedVerdict: string; expectedDefects: string[]; roiOk: boolean; note: string }) {
     setError(null);
     setActionId(id);
     try {
@@ -210,7 +210,7 @@ export default function AppShell({
     confidence: item.confidence,
     roiConfidence: item.roiConfidence,
     defects: item.defects,
-    meta: item.meta ?? `${new Date(item.created_at).toLocaleString("tr-TR")} · ${item.source === "camera" ? "Kamera" : "Yükleme"}`,
+    meta: item.meta ?? (item.source === "camera" ? "Kamera" : "Yükleme"),
   }));
 
   return (
@@ -315,7 +315,6 @@ function itemToDetail(item: StoredAnalysis): DetailItem {
     roiConfidence: item.roiConfidence,
     defects: item.defects,
     pipeline: item.pipeline,
-    createdAt: item.created_at,
     metrics: item.metrics,
   };
 }

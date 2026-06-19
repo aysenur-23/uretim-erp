@@ -59,12 +59,13 @@ export function DetailModal({
   onClose: () => void;
   onReprocess?: (id: string) => void;
   onDelete?: (id: string) => void;
-  onFeedback?: (id: string, payload: { expectedVerdict: string; expectedDefects: string[]; note: string }) => Promise<void>;
+  onFeedback?: (id: string, payload: { expectedVerdict: string; expectedDefects: string[]; roiOk: boolean; note: string }) => Promise<void>;
   actionBusy?: boolean;
 }) {
   const [showOverlay, setShowOverlay] = useState(true);
   const [expectedVerdict, setExpectedVerdict] = useState<Verdict>("KABUL");
   const [expectedDefects, setExpectedDefects] = useState<string[]>([]);
+  const [roiOk, setRoiOk] = useState(true);
   const [feedbackNote, setFeedbackNote] = useState("");
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export function DetailModal({
     setShowOverlay(true);
     setExpectedVerdict(item.verdict);
     setExpectedDefects(item.defects.map((defect) => defect.type));
+    setRoiOk(true);
     setFeedbackNote("");
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -118,11 +120,7 @@ export function DetailModal({
           <div className="flex items-start justify-between gap-2 mb-3">
             <div className="min-w-0">
               <div className="font-semibold truncate" title={item.filename}>{item.filename}</div>
-              {item.createdAt && (
-                <div className="text-[11px] text-[var(--text-muted)]">
-                  {new Date(item.createdAt).toLocaleString("tr-TR")} · {item.source === "camera" ? "Kamera" : "Yükleme"}
-                </div>
-              )}
+              <div className="text-[11px] text-[var(--text-muted)]">{item.source === "camera" ? "Kamera" : "Yükleme"}</div>
             </div>
             <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] text-xl leading-none" aria-label="Kapat">×</button>
           </div>
@@ -198,6 +196,14 @@ export function DetailModal({
                 <option value="RED">RED</option>
               </select>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <label className="col-span-2 flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-2">
+                  <input
+                    type="checkbox"
+                    checked={roiOk}
+                    onChange={(event) => setRoiOk(event.target.checked)}
+                  />
+                  Ürün bbox/ROI doğru
+                </label>
                 {DEFECT_OPTIONS.map((option) => (
                   <label key={option.type} className="flex items-center gap-2">
                     <input
@@ -222,7 +228,7 @@ export function DetailModal({
               />
               <button
                 disabled={actionBusy}
-                onClick={() => onFeedback(item.id, { expectedVerdict, expectedDefects, note: feedbackNote })}
+                onClick={() => onFeedback(item.id, { expectedVerdict, expectedDefects, roiOk, note: feedbackNote })}
                 className="btn btn-primary mt-2 w-full py-2 text-xs disabled:opacity-50"
               >
                 Geri bildirimi kaydet
