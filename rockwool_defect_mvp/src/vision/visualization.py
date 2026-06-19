@@ -52,19 +52,11 @@ def draw_shape_analysis(
     image: np.ndarray,
     contour: np.ndarray,
     rotated_box: tuple[tuple[int, int], tuple[int, int], tuple[int, int], tuple[int, int]],
-    bbox: tuple[int, int, int, int] | None = None,
 ) -> np.ndarray:
     """Draw product contour and shape-aware rotated bounding box."""
     del contour
     result = image.copy()
     overlay = result.copy()
-    if bbox is not None:
-        x, y, width, height = bbox
-        cv2.rectangle(overlay, (x, y), (x + width - 1, y + height - 1), (0, 180, 0), -1)
-        result = cv2.addWeighted(overlay, 0.16, result, 0.84, 0)
-        cv2.rectangle(result, (x, y), (x + width - 1, y + height - 1), (0, 220, 255), 3)
-        return result
-
     points = np.array(rotated_box, dtype=np.int32)
     cv2.fillPoly(overlay, [points], (0, 180, 0))
     result = cv2.addWeighted(overlay, 0.16, result, 0.84, 0)

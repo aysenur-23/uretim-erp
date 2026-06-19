@@ -12,9 +12,6 @@ from src.vision.defect_rules import (
     detect_color_anomaly,
     detect_dark_crack_like_regions,
     detect_edge_damage,
-    detect_glass_burn,
-    detect_raw_fiber,
-    detect_shape_deformation,
 )
 from src.vision.preprocessing import resize_image
 from src.vision.product_detection import ProductROI, find_product_roi
@@ -81,29 +78,6 @@ def draw_crack_mask_on_image(
     return result
 
 
-def draw_rule_mask_on_image(
-    image: np.ndarray,
-    bbox: tuple[int, int, int, int],
-    mask: np.ndarray | None,
-    color: tuple[int, int, int],
-    alpha: float = 0.30,
-) -> np.ndarray:
-    if mask is None:
-        return image
-
-    x, y, width, height = bbox
-    result = image.copy()
-    crop = result[y : y + height, x : x + width]
-    if crop.shape[:2] != mask.shape[:2]:
-        mask = cv2.resize(mask, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_NEAREST)
-
-    color_overlay = np.zeros_like(crop)
-    color_overlay[:, :] = color
-    blended = cv2.addWeighted(crop, 1.0 - alpha, color_overlay, alpha, 0)
-    crop[mask > 0] = blended[mask > 0]
-    return result
-
-
 def draw_heatmap_on_image(
     image: np.ndarray,
     bbox: tuple[int, int, int, int],
@@ -131,135 +105,10 @@ def run_defect_rules(
     config: AppConfig,
 ) -> dict[str, dict]:
     local_anomaly = detect_local_anomaly(roi, config)
-    color_anomaly = detect_color_anomaly(frame, roi, config)
-    glass_burn = detect_glass_burn(frame, roi, config)
-    dark_crack = detect_dark_crack_like_regions(frame, roi, config)
-    raw_fiber = detect_raw_fiber(frame, roi, config)
-    raw_fiber_structural_signal = (
-        float(raw_fiber.get("structural_largest_component_ratio", 0.0)) >= 0.008
-        or float(raw_fiber.get("raw_fiber_relief_ratio", 0.0)) >= 0.018
-        or float(raw_fiber.get("raw_fiber_ratio", 0.0)) >= 0.018
-    )
-    raw_fiber_glass_strand_signal = (
-        float(raw_fiber.get("glass_fiber_largest_component_ratio", 0.0)) >= 0.006
-        or float(raw_fiber.get("glass_fiber_ratio", 0.0)) >= 0.055
-    )
-    pale_surface_fiber_like = (
-        bool(glass_burn.get("is_suspicious", False))
-        and float(glass_burn.get("mean_mask_corrected_v", 255.0)) > 90.0
-        and float(color_anomaly.get("score", 0.0)) >= 0.30
-        and not bool(dark_crack.get("is_suspicious", False))
-        and raw_fiber_structural_signal
-    )
-    local_surface_fiber_like = (
-        bool(local_anomaly.get("is_suspicious", False))
-        and not bool(dark_crack.get("is_suspicious", False))
-        and not bool(glass_burn.get("is_suspicious", False))
-        and (raw_fiber_structural_signal or raw_fiber_glass_strand_signal)
-        and float(raw_fiber.get("raw_fiber_visible_ratio", 0.0)) >= 0.006
-    )
-    broad_pale_surface_like = (
-        not bool(dark_crack.get("is_suspicious", False))
-        and not bool(glass_burn.get("is_suspicious", False))
-        and float(glass_burn.get("largest_component_ratio", 0.0)) >= 0.025
-        and float(glass_burn.get("mean_mask_corrected_v", 0.0)) >= 110.0
-        and float(glass_burn.get("mean_mask_sat", 255.0)) <= 75.0
-        and raw_fiber_structural_signal
-    )
-    texture_spread_fiber_like = (
-        bool(color_anomaly.get("is_suspicious", False))
-        and not bool(dark_crack.get("is_suspicious", False))
-        and not bool(glass_burn.get("is_suspicious", False))
-        and float(color_anomaly.get("anomalous_ratio", 0.0)) <= 0.006
-        and float(color_anomaly.get("largest_component_ratio", 0.0)) <= 0.006
-        and float(color_anomaly.get("score", 0.0)) <= 0.45
-        and (raw_fiber_structural_signal or raw_fiber_glass_strand_signal)
-    )
-    if pale_surface_fiber_like or local_surface_fiber_like or broad_pale_surface_like or texture_spread_fiber_like:
-        raw_fiber = {
-            **raw_fiber,
-            "score": max(
-                float(raw_fiber.get("score", 0.0)),
-                0.40 if texture_spread_fiber_like else (0.45 if not broad_pale_surface_like else 0.35),
-            ),
-            "is_suspicious": True,
-            "message": "Kabarik/acik cig elyaf yuzey anomalisi supheli.",
-            "strategy": f"{raw_fiber.get('strategy', '')}; acik-gri/dokusal yuzey anomalisi yeniden siniflandirma",
-            "mask": raw_fiber.get("mask") if raw_fiber.get("mask") is not None else glass_burn.get("mask"),
-            "pale_surface_reclassified": True,
-        }
-    if bool(dark_crack.get("is_suspicious", False)) and bool(glass_burn.get("is_suspicious", False)):
-        glass_burn = {
-            **glass_burn,
-            "score": min(float(glass_burn.get("score", 0.0)), 0.22),
-            "is_suspicious": False,
-            "message": "Koyu sinyal catlak olarak siniflandi; cam yanigi bastirildi.",
-            "suppressed_by_crack": True,
-        }
-    if bool(dark_crack.get("is_suspicious", False)):
-        if bool(raw_fiber.get("is_suspicious", False)) and float(raw_fiber.get("score", 0.0)) < 0.60:
-            raw_fiber = {
-                **raw_fiber,
-                "score": min(float(raw_fiber.get("score", 0.0)), 0.22),
-                "is_suspicious": False,
-                "message": "Acik lif sinyali catlak maskesi icinde yardimci sinyal olarak bastirildi.",
-                "suppressed_by_crack": True,
-            }
-        if bool(local_anomaly.get("is_suspicious", False)):
-            local_anomaly = {
-                **local_anomaly,
-                "score": min(float(local_anomaly.get("score", 0.0)), 0.24),
-                "is_suspicious": False,
-                "message": "Yerel anomali catlak olarak siniflandi.",
-                "suppressed_by_crack": True,
-            }
-    if bool(dark_crack.get("raw_fiber_relief_like", False)):
-        relief_score = min(1.0, max(float(dark_crack.get("score", 0.0)) * 0.88, 0.62))
-        raw_fiber = {
-            **raw_fiber,
-            "score": relief_score,
-            "is_suspicious": True,
-            "message": "Kabarik/lifsi cig elyaf dokusu supheli.",
-            "strategy": f"{raw_fiber.get('strategy', '')}; kabarik lifsi dikey relief yeniden siniflandirma",
-            "mask": raw_fiber.get("mask") if raw_fiber.get("mask") is not None else dark_crack.get("mask"),
-            "relief_reclassified": True,
-        }
-        dark_crack = {
-            **dark_crack,
-            "score": min(float(dark_crack.get("score", 0.0)), 0.22),
-            "is_suspicious": False,
-            "message": "Cizgisel sinyal cig elyaf relief olarak siniflandi.",
-            "suppressed_by_raw_fiber": True,
-        }
-    if bool(raw_fiber.get("is_suspicious", False)) and not bool(dark_crack.get("is_suspicious", False)):
-        color_anomaly = {
-            **color_anomaly,
-            "score": min(float(color_anomaly.get("score", 0.0)), 0.22),
-            "is_suspicious": False,
-            "message": "Renk farki cig elyaf olarak siniflandi.",
-            "suppressed_by_raw_fiber": True,
-        }
-        glass_burn = {
-            **glass_burn,
-            "score": min(float(glass_burn.get("score", 0.0)), 0.22),
-            "is_suspicious": False,
-            "message": "Koyu/açik sinyal cig elyaf olarak siniflandi.",
-            "suppressed_by_raw_fiber": True,
-        }
-        local_anomaly = {
-            **local_anomaly,
-            "score": min(float(local_anomaly.get("score", 0.0)), 0.24),
-            "is_suspicious": False,
-            "message": "Yerel anomali cig elyaf olarak siniflandi.",
-            "suppressed_by_raw_fiber": True,
-        }
     return {
         "edge_damage": detect_edge_damage(frame, roi, bbox, config),
-        "deformation": detect_shape_deformation(frame, roi, bbox, config),
-        "color_anomaly": color_anomaly,
-        "glass_burn": glass_burn,
-        "raw_fiber": raw_fiber,
-        "dark_crack": dark_crack,
+        "color_anomaly": detect_color_anomaly(frame, roi, config),
+        "dark_crack": detect_dark_crack_like_regions(frame, roi, config),
         "local_anomaly": local_anomaly,
     }
 
@@ -286,16 +135,11 @@ def process_frame(frame: np.ndarray, config: AppConfig) -> AnalysisView:
     bbox = product_display_bbox(product)
     rule_results = run_defect_rules(display_frame, roi, bbox, config)
     decision = decide_quality(rule_results, config)
-    crack_mask = rule_results["dark_crack"].get("mask") if rule_results["dark_crack"].get("is_suspicious") else None
-    burn_mask = rule_results["glass_burn"].get("mask") if rule_results["glass_burn"].get("is_suspicious") else None
-    raw_fiber_mask = rule_results["raw_fiber"].get("mask") if rule_results["raw_fiber"].get("is_suspicious") else None
-    has_specific_overlay = any(mask is not None for mask in (crack_mask, burn_mask, raw_fiber_mask))
-    heatmap = None if has_specific_overlay else rule_results["local_anomaly"].get("heatmap")
+    crack_mask = rule_results["dark_crack"].get("mask")
+    heatmap = rule_results["local_anomaly"].get("heatmap")
 
     overlay = draw_shape_analysis(display_frame, product.contour, product.rotated_box)
     overlay = draw_heatmap_on_image(overlay, bbox, heatmap)
-    overlay = draw_rule_mask_on_image(overlay, bbox, burn_mask, (0, 95, 255), alpha=0.38)
-    overlay = draw_rule_mask_on_image(overlay, bbox, raw_fiber_mask, (255, 210, 40), alpha=0.34)
     overlay = draw_crack_mask_on_image(overlay, bbox, crack_mask)
     return AnalysisView(
         original=display_frame,
