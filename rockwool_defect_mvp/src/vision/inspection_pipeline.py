@@ -135,16 +135,28 @@ def run_defect_rules(
     glass_burn = detect_glass_burn(frame, roi, config)
     dark_crack = detect_dark_crack_like_regions(frame, roi, config)
     raw_fiber = detect_raw_fiber(frame, roi, config)
+    raw_fiber_structural_signal = (
+        float(raw_fiber.get("structural_largest_component_ratio", 0.0)) >= 0.008
+        or float(raw_fiber.get("raw_fiber_relief_ratio", 0.0)) >= 0.018
+        or float(raw_fiber.get("raw_fiber_ratio", 0.0)) >= 0.018
+    )
+    raw_fiber_glass_strand_signal = (
+        float(raw_fiber.get("glass_fiber_largest_component_ratio", 0.0)) >= 0.006
+        or float(raw_fiber.get("glass_fiber_ratio", 0.0)) >= 0.055
+    )
     pale_surface_fiber_like = (
         bool(glass_burn.get("is_suspicious", False))
         and float(glass_burn.get("mean_mask_corrected_v", 255.0)) > 90.0
         and float(color_anomaly.get("score", 0.0)) >= 0.30
         and not bool(dark_crack.get("is_suspicious", False))
+        and raw_fiber_structural_signal
     )
     local_surface_fiber_like = (
         bool(local_anomaly.get("is_suspicious", False))
         and not bool(dark_crack.get("is_suspicious", False))
         and not bool(glass_burn.get("is_suspicious", False))
+        and (raw_fiber_structural_signal or raw_fiber_glass_strand_signal)
+        and float(raw_fiber.get("raw_fiber_visible_ratio", 0.0)) >= 0.006
     )
     broad_pale_surface_like = (
         not bool(dark_crack.get("is_suspicious", False))
@@ -152,6 +164,7 @@ def run_defect_rules(
         and float(glass_burn.get("largest_component_ratio", 0.0)) >= 0.025
         and float(glass_burn.get("mean_mask_corrected_v", 0.0)) >= 110.0
         and float(glass_burn.get("mean_mask_sat", 255.0)) <= 75.0
+        and raw_fiber_structural_signal
     )
     texture_spread_fiber_like = (
         bool(color_anomaly.get("is_suspicious", False))
@@ -160,6 +173,7 @@ def run_defect_rules(
         and float(color_anomaly.get("anomalous_ratio", 0.0)) <= 0.006
         and float(color_anomaly.get("largest_component_ratio", 0.0)) <= 0.006
         and float(color_anomaly.get("score", 0.0)) <= 0.45
+        and (raw_fiber_structural_signal or raw_fiber_glass_strand_signal)
     )
     if pale_surface_fiber_like or local_surface_fiber_like or broad_pale_surface_like or texture_spread_fiber_like:
         raw_fiber = {

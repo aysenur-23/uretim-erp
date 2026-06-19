@@ -9,14 +9,20 @@ export function DefectChips({ defects }: { defects: { label: string; score: numb
   if (defects.length === 0) return <p className="text-xs text-emerald-700">Tespit edilen hata yok.</p>;
   return (
     <ul className="space-y-1">
-      {defects.map((d, i) => (
-        <li key={`${d.label}-${i}-${d.score}`} className="flex items-center justify-between text-xs">
-          <span>{d.label}</span>
-          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-            d.severity === "high" ? "bg-red-100 text-red-700"
-              : d.severity === "medium" ? "bg-amber-100 text-amber-700"
-              : "bg-slate-100 text-slate-600"
-          }`}>%{d.score}</span>
+      {defects.map((defect, index) => (
+        <li key={`${defect.label}-${index}-${defect.score}`} className="flex items-center justify-between text-xs">
+          <span>{defect.label}</span>
+          <span
+            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+              defect.severity === "high"
+                ? "bg-red-100 text-red-700"
+                : defect.severity === "medium"
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            %{defect.score}
+          </span>
         </li>
       ))}
     </ul>
