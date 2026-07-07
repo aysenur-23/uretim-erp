@@ -11,7 +11,37 @@ Yeni ana arayuz Next.js + FastAPI ile calisir. Streamlit prototip olarak kalmist
 - Frontend: http://localhost:3000
 - Backend: http://127.0.0.1:8000
 
-Backend mevcut OpenCV kalite kontrol akisindakileri kullanir: `process_frame`, ROI/bbox, catlak, renk, kenar ve yerel anomali kurallari. Frontend `/api/*` isteklerini Next.js proxy uzerinden FastAPI backend'e yollar.
+Backend mevcut OpenCV kalite kontrol akisindakileri kullanir: `process_frame`, ROI/bbox ve 8 bagimsiz hata siniflandirmasi. Frontend `/api/*` isteklerini Next.js proxy uzerinden FastAPI backend'e yollar.
+
+## Hata Türleri (8 sınıf)
+
+Her tür kendi bağımsız dedektörüyle ayrı ayrı çalışır:
+
+1. **Çatlak** (`dark_crack`) — ince, çizgisel, uzun sürekli koyu yapı (çok yönlü black-hat).
+2. **Cam yanığı / koyu leke** (`glass_burn`) — kompakt koyu kahverengi-siyah bölge.
+3. **Renk / leke farklılığı** (`color_anomaly`) — panelden kromatik sapan bölge (L kanalı yarı ağırlık).
+4. **Çiğ elyaf** (`raw_fiber`) — açık renkli, düşük doygunluklu, lifsi/homojen olmayan yüzey.
+5. **Kenar bozukluğu** (`edge_damage`) — kenarda çentik, kopma, düzensiz sınır.
+6. **Boyut / gönye hatası** (`size_tolerance`) — sabit kamera px/mm kalibrasyonuyla ölçü ve köşe dikliği.
+7. **Deformasyon** (`deformation`) — global form bozulması (eğilme/ezilme, kenar yayı).
+8. **Sağlam** — hata bulunmayan ürün (KABUL kararı).
+
+Ek olarak `local_anomaly` destekleyici bir genel-tarama sinyalidir (tek başına RED veremez).
+
+Sınıf ayrımı her dedektörün kendi şekil/renk mantığıyla sağlanır; yalnızca çatlak–yanık
+çakışmasında tek bir açık hakem kuralı (`arbitrate_overlaps`) devreye girer.
+
+## Boyut/Gönye ve Arka Plan Kalibrasyonu (sabit kamera)
+
+Boyut kontrolü öntanımlı kapalıdır. Sabit kamera kurulumunda:
+
+- `POST /api/calibration/size` (`{recordId, knownWidthMm, knownHeightMm}`) — bilinen ölçülü bir
+  panelden px/mm öğrenir, `data/calibration/size_calibration.json` sidecar'ına yazar ve boyut
+  kontrolünü etkinleştirir. `config.yaml` yorumlarına dokunulmaz.
+- `POST /api/calibration/background` (görüntü) — boş bant referansı; düşük kontrastlı panellerde
+  en güvenilir ürün ayrımı için kullanılır. `DELETE` ile kapatılır.
+- Beklenen ölçü/tolerans `config.yaml`: `expected_width_mm`, `expected_height_mm`,
+  `size_tolerance_mm`, `squareness_tolerance_deg`.
 Endüstriyel taş yünü paneller için görüntü tabanlı kalite kontrol uygulaması.
 
 Uygulama iki giriş kaynağını aynı denetim hattından geçirir:
@@ -102,7 +132,19 @@ Ortam ışığı veya ürün tonu değişirse önce arayüzdeki `Kalibrasyon` al
 
 Kurumsal pilot için sıradaki teknik adımlar:
 
-- Daha geniş gerçek saha veri setiyle eşik doğrulama
+- Daha geniş gerçek saha veri setiyle eşik doğrulama (`decision_profile` ile sınıf-bazlı ayar)
 - Operatör geri bildiriminden otomatik eşik önerisi
 - PatchCore veya benzeri öğrenilmiş modelin adapter üzerinden devreye alınması
 - Rol bazlı kullanıcı akışı ve denetim raporu çıktısı
+
+## Karar Motoru Ayarı
+
+Sınıf-bazlı eşikler `src/decision/decision_engine.py` içindeki `DEFAULT_PROFILE`'da tanımlıdır
+(her sınıf için `warn`/`reject`/`weight`). Saha verisiyle ayar için `config.yaml` içindeki
+`decision_profile` ile yalnızca istenen alanlar ezilebilir, örn:
+
+```yaml
+decision_profile:
+  raw_fiber:
+    reject: 0.5
+```
