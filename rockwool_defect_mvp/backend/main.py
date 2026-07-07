@@ -380,16 +380,7 @@ def _roi_confidence_from_analysis(analysis: AnalysisView) -> float:
     product = analysis.product
     if product is None:
         return 0.0
-    x, y, width, height = product.shape_bbox
-    image_height, image_width = analysis.original.shape[:2]
-    bbox_area_ratio = (width * height) / float(max(1, image_width * image_height))
-    aspect_ratio = max(width, height) / float(max(1, min(width, height)))
-    area_score = min(1.0, max(0.0, (bbox_area_ratio - 0.12) / 0.58))
-    aspect_score = 1.0 - min(1.0, abs(aspect_ratio - 1.85) / 2.3)
-    border_score = 1.0
-    if x <= 0 or y <= 0 or x + width >= image_width or y + height >= image_height:
-        border_score = 0.82
-    return round(max(0.0, min(1.0, area_score * 0.55 + aspect_score * 0.35 + border_score * 0.10)), 3)
+    return round(float(product.roi_confidence), 3)
 
 
 def _defect_reason(defect_type: str, score: float) -> str:

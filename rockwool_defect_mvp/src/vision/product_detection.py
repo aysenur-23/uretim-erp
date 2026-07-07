@@ -21,21 +21,37 @@ class ProductROI:
     shape_roi: np.ndarray
     shape_mask_roi: np.ndarray
     area_ratio: float
+    # Geriye uyumlu ek alanlar (default'lu).
+    corners: tuple[tuple[float, float], ...] = ()  # TL, TR, BR, BL (görüntü koordinatı)
+    roi_confidence: float = 0.0
+    detection_method: str = "color_otsu"  # "background_diff" | "color_otsu" | "grabcut"
 
 
 def find_product_roi(image: np.ndarray, config: AppConfig) -> ProductROI | None:
-    """Find the main product region using the largest foreground contour."""
+    """Find the main product region using the largest foreground contour.
+
+    Tespit kaskadı: (1) sabit kamera boş-bant referansı varsa arka plan farkı,
+    (2) Otsu/HSV maskesi, (3) çerçeveyi dolduran kontur için GrabCut geri düşüşü.
+    """
     if image.size == 0:
         raise ValueError("Cannot detect product in an empty image.")
 
-    mask = _build_product_mask(image, config)
-    contour = _largest_contour(mask)
+    detection_method = "color_otsu"
+    mask = _build_background_diff_mask(image, config)
+    contour = _largest_contour(mask) if mask is not None else None
+    if contour is not None and _min_area_ratio(contour, image.shape) >= config.min_product_area_ratio:
+        detection_method = "background_diff"
+    else:
+        mask = _build_product_mask(image, config)
+        contour = _largest_contour(mask)
+
     if contour is not None and _is_overfilled_bbox(contour, image.shape):
         fallback_mask = _build_grabcut_mask(image)
         fallback_contour = _largest_contour(fallback_mask)
         if fallback_contour is not None:
             mask = fallback_mask
             contour = fallback_contour
+            detection_method = "grabcut"
 
     if contour is None:
         return None
@@ -53,6 +69,16 @@ def find_product_roi(image: np.ndarray, config: AppConfig) -> ProductROI | None:
     if area_ratio < config.min_product_area_ratio:
         return None
 
+    corners = _fit_quadrilateral_corners(contour, image.shape)
+    if corners is not None:
+        # minAreaRect 90°'ye zorlar; fit edilen köşeler gerçek gönye bilgisi taşır.
+        rotated_box = tuple((int(round(px)), int(round(py))) for px, py in corners)
+    corners_tuple = tuple((float(px), float(py)) for px, py in corners) if corners is not None else ()
+
+    roi_confidence = estimate_roi_confidence(
+        image, shape_mask, contour, corners, detection_method
+    )
+
     roi = image[y : y + height, x : x + width].copy()
     return ProductROI(
         roi=roi,
@@ -65,7 +91,50 @@ def find_product_roi(image: np.ndarray, config: AppConfig) -> ProductROI | None:
         shape_roi=shape_roi,
         shape_mask_roi=shape_mask_roi,
         area_ratio=area_ratio,
+        corners=corners_tuple,
+        roi_confidence=roi_confidence,
+        detection_method=detection_method,
     )
+
+
+def _min_area_ratio(contour: np.ndarray, image_shape: tuple[int, ...]) -> float:
+    image_area = float(image_shape[0] * image_shape[1])
+    return float(cv2.contourArea(contour)) / image_area if image_area else 0.0
+
+
+def _build_background_diff_mask(image: np.ndarray, config: AppConfig) -> np.ndarray | None:
+    """Sabit kamera boş-bant referansı ile Lab farkı maskesi (yoksa None).
+
+    En güvenilir ayrım: kamera sabit olduğundan boş bandın referans görüntüsüyle
+    fark alınır. Lab uzayında, aydınlatma kaymasına dayanıklı olması için L kanalı
+    daha düşük ağırlıkla değerlendirilir.
+    """
+    reference_path = config.background_reference_path
+    if reference_path is None:
+        return None
+    reference = cv2.imread(str(reference_path), cv2.IMREAD_COLOR)
+    if reference is None:
+        return None
+
+    height, width = image.shape[:2]
+    if reference.shape[:2] != (height, width):
+        reference = cv2.resize(reference, (width, height), interpolation=cv2.INTER_AREA)
+
+    image_lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB).astype(np.float32)
+    reference_lab = cv2.cvtColor(reference, cv2.COLOR_BGR2LAB).astype(np.float32)
+    diff = np.abs(image_lab - reference_lab)
+    weighted = diff[:, :, 0] * 0.5 + diff[:, :, 1] * 1.0 + diff[:, :, 2] * 1.0
+    weighted = cv2.GaussianBlur(weighted, (7, 7), 0)
+    weighted_u8 = np.clip(weighted, 0, 255).astype(np.uint8)
+
+    otsu_value, _ = cv2.threshold(weighted_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    threshold = max(18.0, float(otsu_value))
+    mask = (weighted_u8 >= threshold).astype(np.uint8) * 255
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    return mask
 
 
 def _build_product_mask(image: np.ndarray, config: AppConfig) -> np.ndarray:
@@ -252,6 +321,199 @@ def _box_from_mask(
     return tuple((int(x), int(y)) for x, y in box_points)
 
 
+def _order_corners_clockwise(points: np.ndarray) -> np.ndarray:
+    """4 noktayı TL, TR, BR, BL sırasına diz."""
+    pts = np.asarray(points, dtype=np.float32).reshape(-1, 2)
+    center = pts.mean(axis=0)
+    angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
+    order = np.argsort(angles)
+    ordered = pts[order]
+    # arctan2 saat yönünün tersini verir; TL'den başlatmak için en sol-üstü bul.
+    start = int(np.argmin(ordered.sum(axis=1)))
+    ordered = np.roll(ordered, -start, axis=0)
+    # Saat yönü (TL, TR, BR, BL) olacak şekilde yönü sabitle.
+    if _polygon_signed_area(ordered) < 0:
+        ordered = ordered[::-1]
+        start = int(np.argmin(ordered.sum(axis=1)))
+        ordered = np.roll(ordered, -start, axis=0)
+    return ordered.astype(np.float32)
+
+
+def _polygon_signed_area(pts: np.ndarray) -> float:
+    x = pts[:, 0]
+    y = pts[:, 1]
+    return 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+
+def _line_intersection(
+    line_a: tuple[float, float, float, float],
+    line_b: tuple[float, float, float, float],
+) -> tuple[float, float] | None:
+    """fitLine formatındaki (vx, vy, x0, y0) iki doğrunun kesişimi."""
+    vx_a, vy_a, x0_a, y0_a = line_a
+    vx_b, vy_b, x0_b, y0_b = line_b
+    denominator = vx_a * vy_b - vy_a * vx_b
+    if abs(denominator) < 1e-6:
+        return None
+    t = ((x0_b - x0_a) * vy_b - (y0_b - y0_a) * vx_b) / denominator
+    return (x0_a + t * vx_a, y0_a + t * vy_a)
+
+
+def _fit_quadrilateral_corners(
+    contour: np.ndarray | None,
+    image_shape: tuple[int, ...],
+) -> np.ndarray | None:
+    """Panel köşelerini (4,2) olarak fit et; gönye ölçümü için gerçek köşeler.
+
+    minAreaRect köşeleri 90°'ye zorlar; burada ham ürün konturunun her kenarına
+    doğru fit edilerek (kırık köşelere dayanıklı, %10 uç nokta atılarak) gerçek
+    köşe açıları korunur. Eksene hizalanmış shape_mask yerine ham kontur kullanılır.
+    """
+    if contour is None or cv2.contourArea(contour) <= 0:
+        return None
+
+    rect = cv2.minAreaRect(contour)
+    box = cv2.boxPoints(rect)  # 4 köşe, sıralı
+    box = _order_corners_clockwise(box)
+
+    points = contour.reshape(-1, 2).astype(np.float32)
+    diagonal = float(np.hypot(*(box[0] - box[2])))
+    if diagonal <= 0:
+        return None
+
+    # Her kenar segmenti (i -> i+1); her kontur noktasını en yakın kenara ata.
+    side_segments = [(box[i], box[(i + 1) % 4]) for i in range(4)]
+    distances = np.stack(
+        [_point_segment_distance(points, seg[0], seg[1]) for seg in side_segments],
+        axis=1,
+    )
+    assignments = np.argmin(distances, axis=1)
+
+    fitted_lines: list[tuple[float, float, float, float] | None] = []
+    for side_index in range(4):
+        side_points = points[assignments == side_index]
+        if len(side_points) < 20:
+            fitted_lines.append(None)
+            continue
+        seg = side_segments[side_index]
+        side_dist = _point_segment_distance(side_points, seg[0], seg[1])
+        keep = side_dist <= np.percentile(side_dist, 90)
+        kept_points = side_points[keep]
+        if len(kept_points) < 10:
+            kept_points = side_points
+        line = cv2.fitLine(kept_points, cv2.DIST_HUBER, 0, 0.01, 0.01).reshape(-1)
+        fitted_lines.append((float(line[0]), float(line[1]), float(line[2]), float(line[3])))
+
+    height, width = image_shape[:2]
+    margin = diagonal * 0.12
+    corners = []
+    for corner_index in range(4):
+        prev_side = (corner_index - 1) % 4
+        line_prev = fitted_lines[prev_side]
+        line_curr = fitted_lines[corner_index]
+        point: tuple[float, float] | None = None
+        if line_prev is not None and line_curr is not None:
+            point = _line_intersection(line_prev, line_curr)
+        box_corner = box[corner_index]
+        # Fit edilen kesişim, minAreaRect köşesine makul yakınlıkta ve görüntü
+        # sınırları içinde (küçük taşma payıyla) değilse boxPoints'e geri düş.
+        valid = (
+            point is not None
+            and np.hypot(point[0] - box_corner[0], point[1] - box_corner[1]) <= diagonal * 0.20
+            and -margin <= point[0] <= width + margin
+            and -margin <= point[1] <= height + margin
+        )
+        if not valid:
+            point = (float(box_corner[0]), float(box_corner[1]))
+        corners.append(point)
+
+    return _order_corners_clockwise(np.array(corners, dtype=np.float32))
+
+
+def _point_segment_distance(points: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Nokta kümesinin a-b segmentine dik uzaklıkları (vektörize)."""
+    ab = b - a
+    length_sq = float(ab[0] ** 2 + ab[1] ** 2)
+    if length_sq <= 1e-6:
+        return np.hypot(points[:, 0] - a[0], points[:, 1] - a[1])
+    t = ((points[:, 0] - a[0]) * ab[0] + (points[:, 1] - a[1]) * ab[1]) / length_sq
+    t = np.clip(t, 0.0, 1.0)
+    proj_x = a[0] + t * ab[0]
+    proj_y = a[1] + t * ab[1]
+    return np.hypot(points[:, 0] - proj_x, points[:, 1] - proj_y)
+
+
+def estimate_roi_confidence(
+    image: np.ndarray,
+    shape_mask: np.ndarray,
+    contour: np.ndarray,
+    corners: np.ndarray | None,
+    detection_method: str,
+) -> float:
+    """ROI tespitinin güvenilirliğini [0,1] aralığında tahmin et."""
+    image_height, image_width = image.shape[:2]
+    image_area = float(image_height * image_width)
+    if image_area <= 0:
+        return 0.0
+
+    contour_area = float(cv2.contourArea(contour))
+    area_ratio = contour_area / image_area
+    # Beklenen alan bandı: %15–%85 arası tam güven.
+    area_score = float(np.clip((area_ratio - 0.05) / 0.10, 0.0, 1.0))
+    area_score *= float(np.clip((0.95 - area_ratio) / 0.10, 0.0, 1.0))
+
+    rectangularity = 1.0
+    if corners is not None:
+        quad_area = abs(_polygon_signed_area(np.asarray(corners, dtype=np.float32)))
+        if quad_area > 0:
+            rectangularity = float(np.clip(contour_area / quad_area, 0.0, 1.0))
+
+    # Kenar desteği: quad çevresi boyunca Canny kenarlarıyla örtüşme.
+    edge_support = 0.5
+    if corners is not None:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 45, 130)
+        edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+        edge_support = _perimeter_edge_support(edges, np.asarray(corners, dtype=np.float32))
+
+    x, y, width, height = cv2.boundingRect(contour)
+    touches = (
+        int(x <= 1)
+        + int(y <= 1)
+        + int(x + width >= image_width - 1)
+        + int(y + height >= image_height - 1)
+    )
+    border_penalty = 0.12 * touches
+
+    confidence = 0.4 * area_score + 0.3 * rectangularity + 0.3 * edge_support
+    if detection_method == "background_diff":
+        confidence += 0.1
+    confidence -= border_penalty
+    return float(np.clip(confidence, 0.0, 1.0))
+
+
+def _perimeter_edge_support(edges: np.ndarray, corners: np.ndarray) -> float:
+    """Quad çevresi üzerinde kenar pikseliyle desteklenen örnek oranı."""
+    height, width = edges.shape[:2]
+    supported = 0
+    total = 0
+    for i in range(4):
+        p1 = corners[i]
+        p2 = corners[(i + 1) % 4]
+        samples = max(2, int(np.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 4))
+        for s in range(samples):
+            t = s / float(samples - 1) if samples > 1 else 0.0
+            px = int(round(p1[0] + t * (p2[0] - p1[0])))
+            py = int(round(p1[1] + t * (p2[1] - p1[1])))
+            if 0 <= px < width and 0 <= py < height:
+                total += 1
+                if edges[py, px] > 0:
+                    supported += 1
+    if total == 0:
+        return 0.0
+    return supported / float(total)
+
+
 def _refine_shape_mask_by_panel_color(
     image: np.ndarray,
     shape_mask: np.ndarray,
@@ -363,6 +625,7 @@ def _build_grabcut_mask(image: np.ndarray) -> np.ndarray:
     grabcut_mask = np.zeros((height, width), dtype=np.uint8)
     background_model = np.zeros((1, 65), dtype=np.float64)
     foreground_model = np.zeros((1, 65), dtype=np.float64)
+    cv2.setRNGSeed(12345)  # tekrarlanabilir sonuç için
     cv2.grabCut(
         image,
         grabcut_mask,
