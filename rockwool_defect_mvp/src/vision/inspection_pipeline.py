@@ -7,14 +7,19 @@ import numpy as np
 
 from src.config import AppConfig
 from src.anomaly.simple_anomaly import detect_local_anomaly
+from src.decision.arbitration import arbitrate_overlaps
 from src.decision.decision_engine import DecisionResult, decide_quality
 from src.vision.defect_rules import (
     detect_color_anomaly,
     detect_dark_crack_like_regions,
     detect_edge_damage,
+    detect_glass_burn,
+    detect_raw_fiber,
+    detect_shape_deformation,
 )
 from src.vision.preprocessing import resize_image
 from src.vision.product_detection import ProductROI, find_product_roi
+from src.vision.size_check import detect_size_tolerance
 from src.vision.visualization import draw_shape_analysis
 
 
@@ -100,17 +105,23 @@ def draw_heatmap_on_image(
 
 def run_defect_rules(
     frame: np.ndarray,
-    roi: np.ndarray,
-    bbox: tuple[int, int, int, int],
+    product: ProductROI,
     config: AppConfig,
 ) -> dict[str, dict]:
-    local_anomaly = detect_local_anomaly(roi, config)
-    return {
-        "edge_damage": detect_edge_damage(frame, roi, bbox, config),
+    """8 bağımsız dedektörü çalıştırır; sadece çatlak/yanık çakışması arbitre edilir."""
+    roi = product_display_roi(product)
+    bbox = product_display_bbox(product)
+    results = {
+        "edge_damage": detect_edge_damage(frame, roi, bbox, config, product),
+        "deformation": detect_shape_deformation(frame, roi, bbox, config, product),
+        "size_tolerance": detect_size_tolerance(product, config),
+        "glass_burn": detect_glass_burn(frame, roi, config),
+        "raw_fiber": detect_raw_fiber(frame, roi, config),
         "color_anomaly": detect_color_anomaly(frame, roi, config),
         "dark_crack": detect_dark_crack_like_regions(frame, roi, config),
-        "local_anomaly": local_anomaly,
+        "local_anomaly": detect_local_anomaly(roi, config),
     }
+    return arbitrate_overlaps(results)
 
 
 def process_frame(frame: np.ndarray, config: AppConfig) -> AnalysisView:
@@ -133,7 +144,7 @@ def process_frame(frame: np.ndarray, config: AppConfig) -> AnalysisView:
 
     roi = product_display_roi(product)
     bbox = product_display_bbox(product)
-    rule_results = run_defect_rules(display_frame, roi, bbox, config)
+    rule_results = run_defect_rules(display_frame, product, config)
     decision = decide_quality(rule_results, config)
     crack_mask = rule_results["dark_crack"].get("mask")
     heatmap = rule_results["local_anomaly"].get("heatmap")
