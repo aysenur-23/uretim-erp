@@ -13,20 +13,69 @@ class DecisionResult:
     reasons: list[str]
 
 
+# Sınıf-bazlı karar profili: her hata sınıfı için uyarı/red eşiği ve ağırlık.
+# reject=None → o sınıf tek başına RED veremez (destekleyici sinyal).
+DEFAULT_PROFILE: dict[str, dict[str, float | None]] = {
+    "dark_crack": {"warn": 0.30, "reject": 0.45, "weight": 1.0},
+    "glass_burn": {"warn": 0.30, "reject": 0.55, "weight": 1.0},
+    "edge_damage": {"warn": 0.35, "reject": 0.60, "weight": 0.8},
+    "size_tolerance": {"warn": 0.25, "reject": 0.60, "weight": 1.0},
+    "deformation": {"warn": 0.30, "reject": 0.65, "weight": 0.7},
+    "raw_fiber": {"warn": 0.30, "reject": 0.60, "weight": 0.8},
+    "color_anomaly": {"warn": 0.30, "reject": 0.70, "weight": 0.6},
+    "local_anomaly": {"warn": 0.42, "reject": None, "weight": 0.4},  # destekleyici
+}
+
+# Tek başına RED veremeyen (destekleyici) sınıflar — çoklu-şüphe sayımında da
+# hariç tutulur.
+_SUPPORTING_CLASSES = {"local_anomaly"}
+
+
+def _resolve_profile(config: AppConfig) -> dict[str, dict[str, float | None]]:
+    """Varsayılan profili config.decision_profile ile birleştir (yalnız verilen alanları ez)."""
+    profile: dict[str, dict[str, float | None]] = {
+        name: dict(entry) for name, entry in DEFAULT_PROFILE.items()
+    }
+    overrides = getattr(config, "decision_profile", None) or {}
+    for name, entry in overrides.items():
+        base = profile.setdefault(name, {"warn": 0.30, "reject": 0.60, "weight": 1.0})
+        for key, value in entry.items():
+            base[key] = value
+    return profile
+
+
 def decide_quality(rule_results: dict[str, dict[str, Any]], config: AppConfig) -> DecisionResult:
-    """Combine OpenCV rule scores into an MVP quality decision."""
-    scores = [float(result.get("score", 0.0)) for result in rule_results.values()]
-    anomaly_score = max(scores) if scores else 0.0
-    suspicious_rules = [
-        name for name, result in rule_results.items() if bool(result.get("is_suspicious", False))
-    ]
+    """Sınıf-bazlı eşik/ağırlıklarla OpenCV kural skorlarını karara dönüştürür."""
+    profile = _resolve_profile(config)
 
-    crack_result = rule_results.get("dark_crack", {})
-    strong_crack_signal = bool(crack_result.get("is_suspicious", False)) and float(crack_result.get("score", 0.0)) >= 0.42
+    weighted_scores = []
+    reject_hits: list[str] = []
+    suspicious_classes: list[str] = []
+    for name, result in rule_results.items():
+        score = float(result.get("score", 0.0))
+        is_suspicious = bool(result.get("is_suspicious", False))
+        entry = profile.get(name, {"warn": 0.30, "reject": 0.60, "weight": 1.0})
+        weight = float(entry.get("weight", 1.0) or 0.0)
+        reject = entry.get("reject", 0.60)
 
-    if anomaly_score >= config.anomaly_score_defect or len(suspicious_rules) >= 2 or strong_crack_signal:
+        weighted_scores.append(weight * score)
+
+        # Her dedektörün KENDİ is_suspicious kararı temel alınır (ham skor değil);
+        # böylece dedektörün alan mantığı (ör. çatlak uzunluk kapısı) korunur.
+        if not is_suspicious:
+            continue
+        suspicious_classes.append(name)
+        if reject is not None and score >= float(reject):
+            reject_hits.append(name)
+
+    anomaly_score = max(weighted_scores) if weighted_scores else 0.0
+
+    # Çoklu-şüphe: destekleyici olmayan sınıflardan en az 2'si RED'e yükseltir.
+    non_supporting_suspicious = [n for n in suspicious_classes if n not in _SUPPORTING_CLASSES]
+
+    if reject_hits or len(non_supporting_suspicious) >= 2:
         label = "HATALI"
-    elif anomaly_score >= config.anomaly_score_suspicious or suspicious_rules:
+    elif suspicious_classes or anomaly_score >= config.anomaly_score_suspicious:
         label = "SUPHELI"
     else:
         label = "SAGLAM"
@@ -49,6 +98,10 @@ def decide_quality(rule_results: dict[str, dict[str, Any]], config: AppConfig) -
 def _rule_display_name(name: str) -> str:
     return {
         "edge_damage": "Kenar",
+        "deformation": "Deformasyon",
+        "size_tolerance": "Boyut/Gonye",
+        "glass_burn": "Cam yanigi",
+        "raw_fiber": "Cam/cig elyaf",
         "color_anomaly": "Renk",
         "dark_crack": "Catlak",
         "local_anomaly": "Yerel anomali",
