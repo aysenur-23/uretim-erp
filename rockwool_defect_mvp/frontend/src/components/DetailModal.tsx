@@ -43,8 +43,12 @@ export type DetailItem = {
     longLineScore: number;
     rectangularity: number;
     squarenessDeg: number;
+    measuredWidthMm?: number;
+    measuredHeightMm?: number;
   };
 };
+
+type DefectOption = { type: string; label: string };
 
 export function DetailModal({
   item,
@@ -66,6 +70,23 @@ export function DetailModal({
   const [expectedDefects, setExpectedDefects] = useState<string[]>([]);
   const [roiOk, setRoiOk] = useState(true);
   const [feedbackNote, setFeedbackNote] = useState("");
+  const [defectOptions, setDefectOptions] = useState<DefectOption[]>(DEFECT_OPTIONS);
+  const [knownWidthMm, setKnownWidthMm] = useState("");
+  const [knownHeightMm, setKnownHeightMm] = useState("");
+  const [calibBusy, setCalibBusy] = useState(false);
+  const [calibMessage, setCalibMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Hata türlerini API'den dinamik al; başarısız olursa statik listeye düş.
+    fetch("/api/defect-types", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data?.items?.length) {
+          setDefectOptions(data.items.map((item: { type: string; label: string }) => ({ type: item.type, label: item.label })));
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!item) return;
@@ -74,6 +95,9 @@ export function DetailModal({
     setExpectedDefects(item.defects.map((defect) => defect.type));
     setRoiOk(true);
     setFeedbackNote("");
+    setKnownWidthMm("");
+    setKnownHeightMm("");
+    setCalibMessage(null);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
@@ -86,6 +110,36 @@ export function DetailModal({
   }, [item, onClose]);
 
   if (!item) return null;
+
+  const activeItem = item;
+  const calibrateFromRecord = async () => {
+    const width = Number(knownWidthMm);
+    const height = Number(knownHeightMm);
+    if (!(width > 0) || !(height > 0)) {
+      setCalibMessage("Geçerli genişlik ve yükseklik (mm) girin.");
+      return;
+    }
+    setCalibBusy(true);
+    setCalibMessage(null);
+    try {
+      const response = await fetch("/api/calibration/size", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordId: Number(activeItem.id), knownWidthMm: width, knownHeightMm: height }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCalibMessage(`Kalibre edildi: ${Number(data.pxPerMm).toFixed(3)} px/mm.`);
+      } else {
+        const detail = await response.json().catch(() => null);
+        setCalibMessage(detail?.detail ? `Başarısız: ${detail.detail}` : "Kalibrasyon başarısız.");
+      }
+    } catch {
+      setCalibMessage("Kalibrasyon başarısız.");
+    } finally {
+      setCalibBusy(false);
+    }
+  };
 
   const severityClass = (severity: string) =>
     severity === "high"
@@ -145,6 +199,45 @@ export function DetailModal({
             )}
           </div>
 
+          {(item.metrics?.measuredWidthMm || item.metrics?.measuredHeightMm) ? (
+            <div className="mt-4 rounded-lg border border-[var(--border)] p-3 text-sm">
+              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Ölçü / Gönye</h3>
+              <div className="flex justify-between"><span className="text-[var(--text-muted)]">Genişlik</span><span>{item.metrics?.measuredWidthMm?.toFixed(1)} mm</span></div>
+              <div className="flex justify-between"><span className="text-[var(--text-muted)]">Yükseklik</span><span>{item.metrics?.measuredHeightMm?.toFixed(1)} mm</span></div>
+              <div className="flex justify-between"><span className="text-[var(--text-muted)]">Gönye</span><span>{item.metrics?.squarenessDeg?.toFixed(1)}°</span></div>
+            </div>
+          ) : null}
+
+          <div className="mt-4 rounded-lg border border-[var(--border)] p-3">
+            <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Bu kayıttan px/mm kalibre et</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                value={knownWidthMm}
+                onChange={(event) => setKnownWidthMm(event.target.value)}
+                placeholder="Bilinen genişlik (mm)"
+                className="rounded-lg border border-[var(--border)] px-2 py-2 text-xs"
+              />
+              <input
+                type="number"
+                inputMode="decimal"
+                value={knownHeightMm}
+                onChange={(event) => setKnownHeightMm(event.target.value)}
+                placeholder="Bilinen yükseklik (mm)"
+                className="rounded-lg border border-[var(--border)] px-2 py-2 text-xs"
+              />
+            </div>
+            <button
+              disabled={calibBusy}
+              onClick={calibrateFromRecord}
+              className="btn btn-outline mt-2 w-full py-2 text-xs disabled:opacity-50"
+            >
+              {calibBusy ? "Kalibre ediliyor..." : "Bu kayıttan kalibre et"}
+            </button>
+            {calibMessage ? <p className="mt-2 text-[11px] text-[var(--text-muted)]">{calibMessage}</p> : null}
+          </div>
+
           {onFeedback && (
             <div className="mt-5 rounded-lg border border-[var(--border)] p-3">
               <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">Doğrulama</h3>
@@ -167,7 +260,7 @@ export function DetailModal({
                   />
                   Ürün çerçevesi doğru
                 </label>
-                {DEFECT_OPTIONS.map((option) => (
+                {defectOptions.map((option) => (
                   <label key={option.type} className="flex items-center gap-2">
                     <input
                       type="checkbox"
