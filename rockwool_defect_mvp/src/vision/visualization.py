@@ -63,6 +63,50 @@ def draw_shape_analysis(
     return draw_rotated_box(result, rotated_box)
 
 
+def draw_size_annotations(
+    image: np.ndarray,
+    corners: tuple[tuple[float, float], ...],
+    size_result: dict,
+) -> np.ndarray:
+    """Fit edilen paneli ve ölçülen mm/gönye değerlerini çizer.
+
+    Toleransta yeşil, tolerans dışında kırmızı çerçeve.
+    """
+    if len(corners) != 4:
+        return image
+
+    result = image.copy()
+    points = np.array(corners, dtype=np.int32)
+    in_tolerance = not bool(size_result.get("is_suspicious", False))
+    color: Color = (0, 200, 0) if in_tolerance else (0, 0, 235)
+    cv2.polylines(result, [points], isClosed=True, color=color, thickness=2)
+
+    width_mm = size_result.get("measured_width_mm")
+    height_mm = size_result.get("measured_height_mm")
+    squareness = size_result.get("squareness_deg")
+    if width_mm is None or height_mm is None:
+        return result
+
+    label = f"{width_mm:.1f} x {height_mm:.1f} mm"
+    if squareness is not None:
+        label += f"  gonye {squareness:.1f} deg"
+
+    top_x = int(min(p[0] for p in corners))
+    top_y = int(min(p[1] for p in corners)) - 10
+    top_y = max(18, top_y)
+    cv2.putText(
+        result,
+        label,
+        (top_x, top_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        color,
+        2,
+        cv2.LINE_AA,
+    )
+    return result
+
+
 def draw_text_panel(
     image: np.ndarray,
     lines: list[str],

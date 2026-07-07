@@ -17,10 +17,15 @@ from src.vision.defect_rules import (
     detect_raw_fiber,
     detect_shape_deformation,
 )
+from src.vision.defect_taxonomy import DEFECT_TAXONOMY
 from src.vision.preprocessing import resize_image
 from src.vision.product_detection import ProductROI, find_product_roi
 from src.vision.size_check import detect_size_tolerance
-from src.vision.visualization import draw_shape_analysis
+from src.vision.visualization import draw_shape_analysis, draw_size_annotations
+
+
+# Kural-özel maske çizilecek sınıflar; çatlak en sonda çizilir (kırmızı üstte kalsın).
+_MASK_OVERLAY_ORDER = ("glass_burn", "raw_fiber", "color_anomaly", "dark_crack")
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,41 @@ def draw_crack_mask_on_image(
     red_overlay[:, :, 2] = crack_mask
     crop_with_overlay = cv2.addWeighted(crop, 0.78, red_overlay, 0.22, 0)
     crop[crack_mask > 0] = crop_with_overlay[crack_mask > 0]
+    return result
+
+
+def _hex_to_bgr(hex_color: str) -> tuple[int, int, int]:
+    """'#rrggbb' -> OpenCV BGR üçlüsü."""
+    value = hex_color.lstrip("#")
+    if len(value) != 6:
+        return (0, 0, 255)
+    r = int(value[0:2], 16)
+    g = int(value[2:4], 16)
+    b = int(value[4:6], 16)
+    return (b, g, r)
+
+
+def draw_rule_mask_on_image(
+    image: np.ndarray,
+    bbox: tuple[int, int, int, int],
+    mask: np.ndarray | None,
+    color: tuple[int, int, int],
+    alpha: float = 0.35,
+) -> np.ndarray:
+    """Bir kural maskesini verilen renkte ROI üzerine yarı saydam çizer."""
+    if mask is None:
+        return image
+
+    x, y, width, height = bbox
+    result = image.copy()
+    crop = result[y : y + height, x : x + width]
+    if crop.shape[:2] != mask.shape[:2]:
+        mask = cv2.resize(mask, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+    color_overlay = np.zeros_like(crop)
+    color_overlay[:] = color
+    blended = cv2.addWeighted(crop, 1.0 - alpha, color_overlay, alpha, 0)
+    crop[mask > 0] = blended[mask > 0]
     return result
 
 
@@ -150,8 +190,24 @@ def process_frame(frame: np.ndarray, config: AppConfig) -> AnalysisView:
     heatmap = rule_results["local_anomaly"].get("heatmap")
 
     overlay = draw_shape_analysis(display_frame, product.contour, product.rotated_box)
-    overlay = draw_heatmap_on_image(overlay, bbox, heatmap)
-    overlay = draw_crack_mask_on_image(overlay, bbox, crack_mask)
+
+    # Her şüpheli dedektörün maskesi taksonomi renginde çizilir (çatlak en üstte).
+    has_specific_overlay = False
+    for name in _MASK_OVERLAY_ORDER:
+        result = rule_results.get(name, {})
+        if result.get("is_suspicious") and result.get("mask") is not None:
+            color = _hex_to_bgr(DEFECT_TAXONOMY[name].overlay_color)
+            overlay = draw_rule_mask_on_image(overlay, bbox, result["mask"], color)
+            has_specific_overlay = True
+
+    # Kural-özel maske yoksa genel anomali heatmap'i gösterilir (gürültü bastırma).
+    if not has_specific_overlay:
+        overlay = draw_heatmap_on_image(overlay, bbox, heatmap)
+
+    # Boyut/gönye kontrolü açıksa ölçü etiketleri çizilir.
+    size_result = rule_results.get("size_tolerance", {})
+    if size_result.get("enabled") and len(product.corners) == 4:
+        overlay = draw_size_annotations(overlay, product.corners, size_result)
     return AnalysisView(
         original=display_frame,
         overlay=overlay,
