@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from src.config import AppConfig, ensure_runtime_directories, load_config
 from src.storage.sqlite_store import SQLiteStore
-from src.vision.defect_taxonomy import PIPELINE_STEPS, ordered_defects
+from src.vision.defect_taxonomy import DISPLAY_THRESHOLDS, PIPELINE_STEPS, ordered_defects
 from src.vision.inspection_pipeline import AnalysisView, process_frame, product_display_bbox
 from src.vision.preprocessing import resize_image
 
@@ -225,13 +225,8 @@ def reprocess(record_id: int) -> dict[str, Any]:
         decision_label,
         anomaly_score,
         _roi_confidence_from_analysis(analysis),
-        _rule_score(analysis, "edge_damage"),
-        _rule_score(analysis, "deformation"),
-        _rule_score(analysis, "color_anomaly"),
-        _rule_score(analysis, "glass_burn"),
-        _rule_score(analysis, "raw_fiber"),
-        _rule_score(analysis, "dark_crack"),
-        _rule_score(analysis, "local_anomaly"),
+        _scores_from_analysis(analysis),
+        rule_details=_rule_details_json(analysis),
         previous_overlay_path=previous_overlay_path,
         previous_model_result=str(record.get("model_result") or ""),
         previous_anomaly_score=float(record.get("anomaly_score") or 0.0),
@@ -303,18 +298,13 @@ def _save_analysis_record(
         "model_result": decision_label,
         "anomaly_score": anomaly_score,
         "roi_confidence": _roi_confidence_from_analysis(analysis),
-        "edge_damage_score": _rule_score(analysis, "edge_damage"),
-        "deformation_score": _rule_score(analysis, "deformation"),
-        "color_anomaly_score": _rule_score(analysis, "color_anomaly"),
-        "glass_burn_score": _rule_score(analysis, "glass_burn"),
-        "raw_fiber_score": _rule_score(analysis, "raw_fiber"),
-        "crack_score": _rule_score(analysis, "dark_crack"),
-        "local_anomaly_score": _rule_score(analysis, "local_anomaly"),
         "operator_label": _default_operator_label(decision_label),
         "operator_note": "",
         "is_model_wrong": 0,
         "is_confirmed": 1,
+        "rule_details": _rule_details_json(analysis),
     }
+    record.update(_scores_from_analysis(analysis))
     return SQLiteStore(config.database_path).insert_inspection_record(record)
 
 
@@ -351,18 +341,9 @@ def _defects_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
     taxonomy_defects = []
-    display_thresholds = {
-        "edge_damage": 0.45,
-        "deformation": 0.24,
-        "glass_burn": 0.25,
-        "raw_fiber": 0.25,
-        "color_anomaly": 0.30,
-        "dark_crack": 0.32,
-        "local_anomaly": 0.60,
-    }
     for meta in ordered_defects():
         score = float(record.get(meta.score_key) or 0.0)
-        if score < display_thresholds.get(meta.defect_type, 0.25):
+        if score < DISPLAY_THRESHOLDS.get(meta.defect_type, 0.25):
             continue
         taxonomy_defects.append(
             {
@@ -575,6 +556,26 @@ def _severity(score: float) -> str:
 
 def _rule_score(analysis: AnalysisView, name: str) -> float:
     return float(analysis.rule_results.get(name, {}).get("score", 0.0))
+
+
+def _scores_from_analysis(analysis: AnalysisView) -> dict[str, float]:
+    """Taksonomi score_key -> skor sözlüğü (DB kolon adlarıyla)."""
+    return {
+        meta.score_key: _rule_score(analysis, meta.defect_type)
+        for meta in ordered_defects()
+    }
+
+
+def _rule_details_json(analysis: AnalysisView) -> str:
+    """Dedektör başına skaler özellikleri JSON'a serialize eder (maskesiz)."""
+    details: dict[str, dict[str, Any]] = {}
+    for name, result in analysis.rule_results.items():
+        details[name] = {
+            key: value
+            for key, value in result.items()
+            if isinstance(value, (int, float, str, bool))
+        }
+    return json.dumps(details)
 
 
 def _archive_current_overlay(record: dict[str, Any], config: AppConfig) -> str | None:

@@ -52,13 +52,17 @@ class SQLiteStoreTests(unittest.TestCase):
                 "HATALI",
                 0.8,
                 0.9,
-                0.1,
-                0.15,
-                0.2,
-                0.6,
-                0.05,
-                0.7,
-                0.3,
+                {
+                    "edge_damage_score": 0.1,
+                    "deformation_score": 0.15,
+                    "size_tolerance_score": 0.42,
+                    "color_anomaly_score": 0.2,
+                    "glass_burn_score": 0.6,
+                    "raw_fiber_score": 0.05,
+                    "crack_score": 0.7,
+                    "local_anomaly_score": 0.3,
+                },
+                rule_details='{"dark_crack": {"score": 0.7}}',
                 previous_overlay_path="old_overlay.jpg",
                 previous_model_result="SAGLAM",
                 previous_anomaly_score=0.2,
@@ -90,6 +94,9 @@ class SQLiteStoreTests(unittest.TestCase):
         self.assertEqual(updated_record["previous_model_result"], "SAGLAM")
         self.assertEqual(updated_record["previous_anomaly_score"], 0.2)
         self.assertEqual(updated_record["last_reprocessed_at"], "20260608_020304_000002")
+        self.assertEqual(updated_record["size_tolerance_score"], 0.42)
+        self.assertEqual(updated_record["crack_score"], 0.7)
+        self.assertEqual(updated_record["rule_details"], '{"dark_crack": {"score": 0.7}}')
         self.assertEqual(summary["totals"]["total_count"], 1)
         self.assertEqual(summary["model_result_counts"][0]["label"], "HATALI")
         self.assertIsNotNone(deleted)

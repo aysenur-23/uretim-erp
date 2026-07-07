@@ -226,6 +226,7 @@ export function DetailModal({
 const DEFECT_OPTIONS = [
   { type: "edge_damage", label: "Kenar" },
   { type: "deformation", label: "Deformasyon" },
+  { type: "size_tolerance", label: "Boyut/Gönye" },
   { type: "glass_burn", label: "Cam yanığı" },
   { type: "raw_fiber", label: "Cam/çiğ elyaf" },
   { type: "color_anomaly", label: "Renk/Leke" },

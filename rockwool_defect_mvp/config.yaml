@@ -15,3 +15,29 @@ crack_darkness_threshold: 0.45
 local_anomaly_threshold: 0.42
 anomaly_score_suspicious: 0.40
 anomaly_score_defect: 0.70
+
+# --- Yeni dedektör eşikleri (opsiyonel; girilmezse varsayılan kullanılır) ---
+glass_burn_threshold: 0.35
+raw_fiber_threshold: 0.30
+deformation_threshold: 0.30
+
+# --- Ürün tespiti (opsiyonel) ---
+# Sabit kamera kurulumunda boş bant referans görüntüsü verilirse en güvenilir
+# ayrım için kullanılır. Boş string = kapalı.
+background_reference_path: ""
+roi_snap_enabled: true
+
+# --- Boyut / gönye kontrolü (sabit kamera) ---
+# size_check_enabled true ve px_per_mm > 0 olduğunda ölçü kontrolü çalışır.
+# px_per_mm kalibrasyonu API üzerinden yapılır ve size_calibration_path'e yazılır.
+size_check_enabled: false
+px_per_mm: 0.0
+expected_width_mm: 600.0
+expected_height_mm: 1200.0
+size_tolerance_mm: 5.0
+squareness_tolerance_deg: 1.5
+size_calibration_path: data/calibration/size_calibration.json
+
+# --- Karar motoru sınıf-bazlı override (opsiyonel) ---
+# Örn: {dark_crack: {reject: 0.5}} sadece verilen alanı ezer.
+decision_profile: {}

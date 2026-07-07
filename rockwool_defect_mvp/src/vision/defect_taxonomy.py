@@ -56,6 +56,16 @@ DEFECT_TAXONOMY: dict[str, DefectMeta] = {
         description="Cam elyafı, bağlayıcı oturmamış açık/berrak lifler veya çiğ lifsi alanlar.",
         decision_impact="Alan büyüdükçe UYARI'dan RED'e yükseltilir.",
     ),
+    "size_tolerance": DefectMeta(
+        defect_type="size_tolerance",
+        score_key="size_tolerance_score",
+        label="Boyut/Gönye",
+        category="Geometri",
+        overlay_color="#22c55e",
+        strategy="Sabit kamera px/mm kalibrasyonuyla ürün genişlik/yükseklik ölçüsü ve köşe diklikleri ölçülür.",
+        description="Ürün beklenen ölçü toleransı dışında veya köşeler 90° değil (gönye hatası).",
+        decision_impact="Tolerans dışı ölçüm doğrudan RED; sınırda sapma UYARI.",
+    ),
     "color_anomaly": DefectMeta(
         defect_type="color_anomaly",
         score_key="color_anomaly_score",
@@ -92,12 +102,27 @@ DEFECT_TAXONOMY: dict[str, DefectMeta] = {
 DEFECT_ORDER = (
     "edge_damage",
     "deformation",
+    "size_tolerance",
     "glass_burn",
     "raw_fiber",
     "color_anomaly",
     "dark_crack",
     "local_anomaly",
 )
+
+
+# Bir hatanın operatöre/UI'a "görünür hata" olarak sunulması için gereken
+# minimum skor. Tek kaynak burada; backend ve evaluate_gallery buradan okur.
+DISPLAY_THRESHOLDS: dict[str, float] = {
+    "edge_damage": 0.45,
+    "deformation": 0.24,
+    "size_tolerance": 0.50,
+    "glass_burn": 0.25,
+    "raw_fiber": 0.25,
+    "color_anomaly": 0.30,
+    "dark_crack": 0.32,
+    "local_anomaly": 0.60,
+}
 
 
 PIPELINE_STEPS = [

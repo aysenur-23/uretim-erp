@@ -751,18 +751,25 @@ def reprocess_gallery_record(config: AppConfig, record_id: int) -> bool:
         overlay_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(overlay_path), analysis.overlay)
 
+    def _score(name: str) -> float:
+        return float(analysis.rule_results.get(name, {}).get("score", 0.0))
+
+    scores = {
+        "edge_damage_score": _score("edge_damage"),
+        "deformation_score": _score("deformation"),
+        "size_tolerance_score": _score("size_tolerance"),
+        "color_anomaly_score": _score("color_anomaly"),
+        "glass_burn_score": _score("glass_burn"),
+        "raw_fiber_score": _score("raw_fiber"),
+        "crack_score": _score("dark_crack"),
+        "local_anomaly_score": _score("local_anomaly"),
+    }
     return store.update_model_result(
         record_id,
         analysis.decision.label,
         analysis.decision.anomaly_score,
         0.0,
-        float(analysis.rule_results.get("edge_damage", {}).get("score", 0.0)),
-        float(analysis.rule_results.get("deformation", {}).get("score", 0.0)),
-        float(analysis.rule_results.get("color_anomaly", {}).get("score", 0.0)),
-        float(analysis.rule_results.get("glass_burn", {}).get("score", 0.0)),
-        float(analysis.rule_results.get("raw_fiber", {}).get("score", 0.0)),
-        float(analysis.rule_results.get("dark_crack", {}).get("score", 0.0)),
-        float(analysis.rule_results.get("local_anomaly", {}).get("score", 0.0)),
+        scores,
         previous_overlay_path=previous_overlay_path,
         previous_model_result=str(record.get("model_result") or ""),
         previous_anomaly_score=float(record.get("anomaly_score") or 0.0),

@@ -16,6 +16,7 @@ INSPECTION_COLUMNS = [
     "roi_confidence",
     "edge_damage_score",
     "deformation_score",
+    "size_tolerance_score",
     "color_anomaly_score",
     "glass_burn_score",
     "raw_fiber_score",
@@ -29,6 +30,19 @@ INSPECTION_COLUMNS = [
     "previous_model_result",
     "previous_anomaly_score",
     "last_reprocessed_at",
+    "rule_details",
+]
+
+# update_model_result çağrılarında kabul edilen skor kolonları (kolon adıyla).
+MODEL_SCORE_COLUMNS = [
+    "edge_damage_score",
+    "deformation_score",
+    "size_tolerance_score",
+    "color_anomaly_score",
+    "glass_burn_score",
+    "raw_fiber_score",
+    "crack_score",
+    "local_anomaly_score",
 ]
 
 
@@ -56,6 +70,7 @@ class SQLiteStore:
                         roi_confidence REAL,
                         edge_damage_score REAL,
                         deformation_score REAL,
+                        size_tolerance_score REAL,
                         color_anomaly_score REAL,
                         glass_burn_score REAL,
                         raw_fiber_score REAL,
@@ -77,6 +92,8 @@ class SQLiteStore:
                 self._ensure_column(connection, "deformation_score", "REAL")
                 self._ensure_column(connection, "glass_burn_score", "REAL")
                 self._ensure_column(connection, "raw_fiber_score", "REAL")
+                self._ensure_column(connection, "size_tolerance_score", "REAL")
+                self._ensure_column(connection, "rule_details", "TEXT")
                 self._ensure_column(connection, "is_model_wrong", "INTEGER NOT NULL DEFAULT 0")
                 self._ensure_column(connection, "previous_overlay_path", "TEXT")
                 self._ensure_column(connection, "previous_model_result", "TEXT")
@@ -144,6 +161,7 @@ class SQLiteStore:
                     roi_confidence,
                     edge_damage_score,
                     deformation_score,
+                    size_tolerance_score,
                     color_anomaly_score,
                     glass_burn_score,
                     raw_fiber_score,
@@ -156,7 +174,8 @@ class SQLiteStore:
                     previous_overlay_path,
                     previous_model_result,
                     previous_anomaly_score,
-                    last_reprocessed_at
+                    last_reprocessed_at,
+                    rule_details
                 FROM inspection_records
                 {where_clause}
                 ORDER BY timestamp DESC
@@ -182,6 +201,7 @@ class SQLiteStore:
                     roi_confidence,
                     edge_damage_score,
                     deformation_score,
+                    size_tolerance_score,
                     color_anomaly_score,
                     glass_burn_score,
                     raw_fiber_score,
@@ -194,7 +214,8 @@ class SQLiteStore:
                     previous_overlay_path,
                     previous_model_result,
                     previous_anomaly_score,
-                    last_reprocessed_at
+                    last_reprocessed_at,
+                    rule_details
                 FROM inspection_records
                 WHERE id = ?
                 """,
@@ -303,34 +324,34 @@ class SQLiteStore:
         model_result: str,
         anomaly_score: float,
         roi_confidence: float,
-        edge_damage_score: float,
-        deformation_score: float,
-        color_anomaly_score: float,
-        glass_burn_score: float,
-        raw_fiber_score: float,
-        crack_score: float,
-        local_anomaly_score: float,
+        scores: dict[str, float],
+        *,
+        rule_details: str | None = None,
         previous_overlay_path: str | None = None,
         previous_model_result: str | None = None,
         previous_anomaly_score: float | None = None,
         last_reprocessed_at: str | None = None,
     ) -> bool:
+        """Yeniden işleme sonrası model çıktılarını günceller.
+
+        ``scores`` kolon adıyla anahtarlanmış skor sözlüğüdür
+        (bkz. ``MODEL_SCORE_COLUMNS``); eksik kolonlar 0.0 kabul edilir.
+        """
+        score_values = [float(scores.get(column, 0.0) or 0.0) for column in MODEL_SCORE_COLUMNS]
+        score_assignments = ",\n                        ".join(
+            f"{column} = ?" for column in MODEL_SCORE_COLUMNS
+        )
         with closing(self._connect()) as connection:
             with connection:
                 cursor = connection.execute(
-                    """
+                    f"""
                     UPDATE inspection_records
                     SET
                         model_result = ?,
                         anomaly_score = ?,
                         roi_confidence = ?,
-                        edge_damage_score = ?,
-                        deformation_score = ?,
-                        color_anomaly_score = ?,
-                        glass_burn_score = ?,
-                        raw_fiber_score = ?,
-                        crack_score = ?,
-                        local_anomaly_score = ?,
+                        {score_assignments},
+                        rule_details = ?,
                         previous_overlay_path = ?,
                         previous_model_result = ?,
                         previous_anomaly_score = ?,
@@ -341,13 +362,8 @@ class SQLiteStore:
                         model_result,
                         anomaly_score,
                         roi_confidence,
-                        edge_damage_score,
-                        deformation_score,
-                        color_anomaly_score,
-                        glass_burn_score,
-                        raw_fiber_score,
-                        crack_score,
-                        local_anomaly_score,
+                        *score_values,
+                        rule_details,
                         previous_overlay_path,
                         previous_model_result,
                         previous_anomaly_score,

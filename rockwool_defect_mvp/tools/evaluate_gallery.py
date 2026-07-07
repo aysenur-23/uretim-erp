@@ -16,18 +16,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.config import load_config
+from src.vision.defect_taxonomy import DISPLAY_THRESHOLDS
 from src.vision.inspection_pipeline import process_frame
-
-
-DISPLAY_THRESHOLDS = {
-    "edge_damage": 0.45,
-    "deformation": 0.24,
-    "glass_burn": 0.25,
-    "raw_fiber": 0.25,
-    "color_anomaly": 0.30,
-    "dark_crack": 0.32,
-    "local_anomaly": 0.60,
-}
 
 MODEL_TO_UI = {
     "SAGLAM": "KABUL",

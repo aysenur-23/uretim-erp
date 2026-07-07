@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -29,6 +30,36 @@ REQUIRED_KEYS = {
 }
 
 
+# config.yaml'da bulunmayabilecek yeni ayarlar; REQUIRED_KEYS büyütülmez ki
+# mevcut config dosyaları ve testlerdeki inline config'ler kırılmasın.
+OPTIONAL_KEYS_WITH_DEFAULTS: dict[str, Any] = {
+    # ürün tespiti
+    "background_reference_path": "",
+    "roi_snap_enabled": True,
+    # yeni dedektör eşikleri
+    "glass_burn_threshold": 0.35,
+    "raw_fiber_threshold": 0.30,
+    "deformation_threshold": 0.30,
+    # boyut / gönye kontrolü
+    "size_check_enabled": False,
+    "px_per_mm": 0.0,
+    "expected_width_mm": 600.0,
+    "expected_height_mm": 1200.0,
+    "size_tolerance_mm": 5.0,
+    "squareness_tolerance_deg": 1.5,
+    "size_calibration_path": "data/calibration/size_calibration.json",
+    # karar motoru sınıf-bazlı override
+    "decision_profile": {},
+}
+
+# Kalibrasyon sidecar JSON'undan config.yaml'ı ezebilecek anahtarlar.
+_CALIBRATION_OVERRIDE_KEYS = (
+    "px_per_mm",
+    "size_check_enabled",
+    "background_reference_path",
+)
+
+
 @dataclass(frozen=True)
 class AppConfig:
     camera_source: str
@@ -46,6 +77,20 @@ class AppConfig:
     local_anomaly_threshold: float
     anomaly_score_suspicious: float
     anomaly_score_defect: float
+    # opsiyonel / yeni ayarlar
+    background_reference_path: Path | None
+    roi_snap_enabled: bool
+    glass_burn_threshold: float
+    raw_fiber_threshold: float
+    deformation_threshold: float
+    size_check_enabled: bool
+    px_per_mm: float
+    expected_width_mm: float
+    expected_height_mm: float
+    size_tolerance_mm: float
+    squareness_tolerance_deg: float
+    size_calibration_path: Path
+    decision_profile: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
 
 def load_yaml_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
@@ -65,7 +110,36 @@ def load_yaml_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str,
         missing = ", ".join(sorted(missing_keys))
         raise KeyError(f"Missing required config keys: {missing}")
 
+    for key, default in OPTIONAL_KEYS_WITH_DEFAULTS.items():
+        config.setdefault(key, default)
+
+    _apply_size_calibration_sidecar(config)
+
     return config
+
+
+def _apply_size_calibration_sidecar(config: dict[str, Any]) -> None:
+    """Operatör kalibrasyonunu (varsa) config.yaml'ı ezmeden uygula.
+
+    Kalibrasyon API'si px/mm ve ilgili ayarları bir JSON sidecar dosyasına
+    yazar; config.yaml yorumlarını bozmadan bu değerler yüklemede uygulanır.
+    """
+    sidecar_value = config.get("size_calibration_path") or ""
+    if not sidecar_value:
+        return
+    sidecar_path = resolve_project_path(sidecar_value)
+    if not sidecar_path.exists():
+        return
+    try:
+        with sidecar_path.open("r", encoding="utf-8") as sidecar_file:
+            data = json.load(sidecar_file)
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+    for key in _CALIBRATION_OVERRIDE_KEYS:
+        if key in data:
+            config[key] = data[key]
 
 
 def resolve_project_path(value: str | Path) -> Path:
@@ -96,6 +170,23 @@ def load_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> AppConfig:
         local_anomaly_threshold=float(raw["local_anomaly_threshold"]),
         anomaly_score_suspicious=float(raw["anomaly_score_suspicious"]),
         anomaly_score_defect=float(raw["anomaly_score_defect"]),
+        background_reference_path=(
+            resolve_project_path(raw["background_reference_path"])
+            if raw.get("background_reference_path")
+            else None
+        ),
+        roi_snap_enabled=bool(raw["roi_snap_enabled"]),
+        glass_burn_threshold=float(raw["glass_burn_threshold"]),
+        raw_fiber_threshold=float(raw["raw_fiber_threshold"]),
+        deformation_threshold=float(raw["deformation_threshold"]),
+        size_check_enabled=bool(raw["size_check_enabled"]),
+        px_per_mm=float(raw["px_per_mm"]),
+        expected_width_mm=float(raw["expected_width_mm"]),
+        expected_height_mm=float(raw["expected_height_mm"]),
+        size_tolerance_mm=float(raw["size_tolerance_mm"]),
+        squareness_tolerance_deg=float(raw["squareness_tolerance_deg"]),
+        size_calibration_path=resolve_project_path(raw["size_calibration_path"]),
+        decision_profile=_parse_decision_profile(raw["decision_profile"]),
     )
 
 
@@ -104,6 +195,27 @@ def ensure_runtime_directories(config: AppConfig) -> None:
     config.image_folder_path.mkdir(parents=True, exist_ok=True)
     config.output_overlay_path.mkdir(parents=True, exist_ok=True)
     config.database_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _parse_decision_profile(value: Any) -> dict[str, dict[str, float]]:
+    """Sınıf-bazlı karar override'ını doğrula ve normalize et."""
+    if not value:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("decision_profile must be a mapping of class -> settings.")
+
+    parsed: dict[str, dict[str, float]] = {}
+    for defect_type, overrides in value.items():
+        if not isinstance(overrides, Mapping):
+            raise ValueError(f"decision_profile[{defect_type}] must be a mapping.")
+        entry: dict[str, float] = {}
+        for field_name, field_value in overrides.items():
+            if field_value is None:
+                entry[str(field_name)] = None  # type: ignore[assignment]
+            else:
+                entry[str(field_name)] = float(field_value)
+        parsed[str(defect_type)] = entry
+    return parsed
 
 
 def _parse_hsv_triplet(value: Any, key: str) -> tuple[int, int, int]:
