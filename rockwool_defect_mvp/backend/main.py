@@ -150,6 +150,111 @@ def calibration_metrics() -> dict[str, Any]:
     return _calibration_metrics(rows)
 
 
+class SizeCalibrationPayload(BaseModel):
+    recordId: int
+    knownWidthMm: float
+    knownHeightMm: float
+
+
+@app.get("/api/calibration/size")
+def get_size_calibration() -> dict[str, Any]:
+    config = get_config()
+    return {
+        "enabled": config.size_check_enabled,
+        "calibrated": config.px_per_mm > 0.0,
+        "pxPerMm": round(config.px_per_mm, 5),
+        "expectedWidthMm": config.expected_width_mm,
+        "expectedHeightMm": config.expected_height_mm,
+        "toleranceMm": config.size_tolerance_mm,
+        "squarenessToleranceDeg": config.squareness_tolerance_deg,
+        "backgroundReference": str(config.background_reference_path) if config.background_reference_path else None,
+    }
+
+
+@app.post("/api/calibration/size")
+def calibrate_size(payload: SizeCalibrationPayload) -> dict[str, Any]:
+    """Bilinen ölçülü bir kayıttan px/mm kalibrasyonu öğrenir ve sidecar'a yazar."""
+    if payload.knownWidthMm <= 0 or payload.knownHeightMm <= 0:
+        raise HTTPException(status_code=400, detail="Known dimensions must be positive")
+
+    config = get_config()
+    store = SQLiteStore(config.database_path)
+    record = store.fetch_inspection_record(payload.recordId)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    image_path = record.get("image_path")
+    frame = cv2.imread(str(image_path)) if image_path else None
+    if frame is None:
+        raise HTTPException(status_code=404, detail="Record image not available")
+
+    analysis = process_frame(frame, config)
+    product = analysis.product
+    if product is None or len(product.corners) != 4:
+        raise HTTPException(status_code=422, detail="Product corners could not be detected for calibration")
+
+    corners = np.array(product.corners, dtype=np.float64)
+    tl, tr, br, bl = corners
+    width_px = (float(np.linalg.norm(tr - tl)) + float(np.linalg.norm(br - bl))) / 2.0
+    height_px = (float(np.linalg.norm(bl - tl)) + float(np.linalg.norm(br - tr))) / 2.0
+    px_per_mm = ((width_px / payload.knownWidthMm) + (height_px / payload.knownHeightMm)) / 2.0
+    if px_per_mm <= 0:
+        raise HTTPException(status_code=422, detail="Calibration produced invalid px/mm")
+
+    _update_calibration_sidecar(
+        config,
+        {
+            "px_per_mm": round(px_per_mm, 6),
+            "size_check_enabled": True,
+            "updated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        },
+    )
+    return {
+        "ok": True,
+        "pxPerMm": round(px_per_mm, 5),
+        "measuredWidthPx": round(width_px, 1),
+        "measuredHeightPx": round(height_px, 1),
+    }
+
+
+@app.post("/api/calibration/background")
+async def set_background_reference(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Sabit kamera boş-bant referans görüntüsünü kaydeder ve etkinleştirir."""
+    config = get_config()
+    frame = await _read_upload_image(file)
+    reference_dir = config.database_path.parents[1] / "calibration"
+    reference_dir.mkdir(parents=True, exist_ok=True)
+    reference_path = reference_dir / "background_reference.jpg"
+    _write_image(reference_path, resize_image(frame))
+    _update_calibration_sidecar(config, {"background_reference_path": str(reference_path)})
+    return {"ok": True, "backgroundReference": str(reference_path)}
+
+
+@app.delete("/api/calibration/background")
+def clear_background_reference() -> dict[str, Any]:
+    config = get_config()
+    _update_calibration_sidecar(config, {"background_reference_path": ""})
+    return {"ok": True}
+
+
+def _update_calibration_sidecar(config: AppConfig, updates: dict[str, Any]) -> None:
+    """Kalibrasyon sidecar JSON'unu birleştirerek günceller (config.yaml'a dokunmaz)."""
+    path = config.size_calibration_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, Any] = {}
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as sidecar:
+                loaded = json.load(sidecar)
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    data.update(updates)
+    with path.open("w", encoding="utf-8") as sidecar:
+        json.dump(data, sidecar, ensure_ascii=False, indent=2)
+
+
 @app.post("/api/analyses/{record_id}/feedback")
 def save_feedback(record_id: int, payload: FeedbackPayload) -> dict[str, Any]:
     config = get_config()
@@ -363,17 +468,39 @@ def _defects_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     return taxonomy_defects
 
 
+def _rule_details_from_record(record: dict[str, Any]) -> dict[str, Any]:
+    raw = record.get("rule_details")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _metrics_from_record(record: dict[str, Any]) -> dict[str, float]:
-    return {
+    details = _rule_details_from_record(record)
+    size = details.get("size_tolerance", {}) if isinstance(details.get("size_tolerance"), dict) else {}
+    deformation = details.get("deformation", {}) if isinstance(details.get("deformation"), dict) else {}
+
+    # Gerçek gönye açısı varsa boyut/deformasyon detayından; yoksa 0.
+    squareness = size.get("squareness_deg", deformation.get("corner_angle_dev", 0.0))
+
+    metrics = {
         "meanH": 0.0,
         "meanS": 0.0,
         "meanV": 0.0,
         "brightSpotRatio": float(record.get("color_anomaly_score") or 0.0),
         "darkSpotRatio": float(record.get("glass_burn_score") or record.get("local_anomaly_score") or 0.0),
         "longLineScore": float(record.get("crack_score") or 0.0),
-        "rectangularity": max(0.0, 1.0 - float(record.get("deformation_score") or record.get("edge_damage_score") or 0.0)),
-        "squarenessDeg": float(record.get("edge_damage_score") or 0.0) * 10,
+        "rectangularity": float(deformation.get("rectangularity", max(0.0, 1.0 - float(record.get("deformation_score") or 0.0)))),
+        "squarenessDeg": float(squareness or 0.0),
     }
+    if size.get("enabled"):
+        metrics["measuredWidthMm"] = float(size.get("measured_width_mm", 0.0))
+        metrics["measuredHeightMm"] = float(size.get("measured_height_mm", 0.0))
+    return metrics
 
 
 def _roi_confidence_from_analysis(analysis: AnalysisView) -> float:
