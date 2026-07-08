@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from src.config import load_config
 from src.decision.decision_engine import decide_quality
+
+
+def _fixed_camera_config():
+    # Boyut/gönye ve deformasyon kararını tam etkin tutan mod (telefon değil).
+    return dataclasses.replace(load_config(), inspection_mode="fixed_camera")
 
 
 class DecisionEngineTests(unittest.TestCase):
@@ -49,24 +55,22 @@ class DecisionEngineTests(unittest.TestCase):
         self.assertEqual(decision.label, "SUPHELI")
 
     def test_size_tolerance_reject_is_defect(self) -> None:
-        config = load_config()
         decision = decide_quality(
             {
                 "size_tolerance": {"score": 0.65, "is_suspicious": True, "message": "olcu"},
             },
-            config,
+            _fixed_camera_config(),
         )
 
         self.assertEqual(decision.label, "HATALI")
 
     def test_two_warns_escalate_to_defect(self) -> None:
-        config = load_config()
         decision = decide_quality(
             {
                 "raw_fiber": {"score": 0.32, "is_suspicious": True, "message": "fiber"},
                 "deformation": {"score": 0.31, "is_suspicious": True, "message": "deform"},
             },
-            config,
+            _fixed_camera_config(),
         )
 
         self.assertEqual(decision.label, "HATALI")

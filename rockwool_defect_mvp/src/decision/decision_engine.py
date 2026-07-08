@@ -26,22 +26,41 @@ DEFAULT_PROFILE: dict[str, dict[str, float | None]] = {
     "local_anomaly": {"warn": 0.42, "reject": None, "weight": 0.4},  # destekleyici
 }
 
-# Tek başına RED veremeyen (destekleyici) sınıflar — çoklu-şüphe sayımında da
-# hariç tutulur.
-_SUPPORTING_CLASSES = {"local_anomaly"}
+# Telefon modu ön ayarı: telefonla yüklenen görüntülerde mesafe/açı değişken
+# olduğundan boyut/gönye mm ölçümü ve deformasyon güvenilir değildir. Bu sınıflar
+# reject=None yapılır (tek başına RED veremez, "destekleyici" olur) ve ağırlıkları
+# düşürülür; karar yüzey/çizgi/kenar hatalarına dayanır, perspektif yanlış RED üretmez.
+PHONE_PROFILE_OVERRIDES: dict[str, dict[str, float | None]] = {
+    "deformation": {"warn": 0.45, "reject": None, "weight": 0.3},
+    "size_tolerance": {"warn": 0.60, "reject": None, "weight": 0.0},
+}
 
 
 def _resolve_profile(config: AppConfig) -> dict[str, dict[str, float | None]]:
-    """Varsayılan profili config.decision_profile ile birleştir (yalnız verilen alanları ez)."""
+    """Varsayılan profili mod ön ayarı ve config.decision_profile ile birleştir.
+
+    Öncelik (düşükten yükseğe): DEFAULT_PROFILE < telefon ön ayarı < kullanıcı override.
+    """
     profile: dict[str, dict[str, float | None]] = {
         name: dict(entry) for name, entry in DEFAULT_PROFILE.items()
     }
+
+    if str(getattr(config, "inspection_mode", "fixed_camera")).lower() == "phone":
+        for name, entry in PHONE_PROFILE_OVERRIDES.items():
+            base = profile.setdefault(name, {"warn": 0.30, "reject": 0.60, "weight": 1.0})
+            base.update(entry)
+
     overrides = getattr(config, "decision_profile", None) or {}
     for name, entry in overrides.items():
         base = profile.setdefault(name, {"warn": 0.30, "reject": 0.60, "weight": 1.0})
         for key, value in entry.items():
             base[key] = value
     return profile
+
+
+def _is_supporting(entry: dict[str, float | None]) -> bool:
+    """reject=None olan sınıf tek başına RED veremez → destekleyici sinyaldir."""
+    return entry.get("reject", 0.60) is None
 
 
 def decide_quality(rule_results: dict[str, dict[str, Any]], config: AppConfig) -> DecisionResult:
@@ -51,6 +70,7 @@ def decide_quality(rule_results: dict[str, dict[str, Any]], config: AppConfig) -
     weighted_scores = []
     reject_hits: list[str] = []
     suspicious_classes: list[str] = []
+    non_supporting_suspicious: list[str] = []
     for name, result in rule_results.items():
         score = float(result.get("score", 0.0))
         is_suspicious = bool(result.get("is_suspicious", False))
@@ -67,11 +87,12 @@ def decide_quality(rule_results: dict[str, dict[str, Any]], config: AppConfig) -
         suspicious_classes.append(name)
         if reject is not None and score >= float(reject):
             reject_hits.append(name)
+        if not _is_supporting(entry):
+            non_supporting_suspicious.append(name)
 
     anomaly_score = max(weighted_scores) if weighted_scores else 0.0
 
-    # Çoklu-şüphe: destekleyici olmayan sınıflardan en az 2'si RED'e yükseltir.
-    non_supporting_suspicious = [n for n in suspicious_classes if n not in _SUPPORTING_CLASSES]
+    # Çoklu-şüphe: destekleyici olmayan (reject=None olmayan) sınıflardan >=2'si RED.
 
     if reject_hits or len(non_supporting_suspicious) >= 2:
         label = "HATALI"

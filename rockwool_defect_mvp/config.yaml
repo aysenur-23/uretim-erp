@@ -16,6 +16,12 @@ local_anomaly_threshold: 0.42
 anomaly_score_suspicious: 0.40
 anomaly_score_defect: 0.70
 
+# --- Denetim modu ---
+# "fixed_camera": bant/sabit kamera (boyut+gönye+deformasyon tam etkin)
+# "phone": telefonla yüklenen görüntü — boyut/gönye ve deformasyon kararı
+#          etkilemez (perspektif yanlış RED üretmesin), yüzey/çizgi/kenar odaklı.
+inspection_mode: phone
+
 # --- Yeni dedektör eşikleri (opsiyonel; girilmezse varsayılan kullanılır) ---
 glass_burn_threshold: 0.35
 raw_fiber_threshold: 0.30

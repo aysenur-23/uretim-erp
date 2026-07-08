@@ -31,7 +31,22 @@ Ek olarak `local_anomaly` destekleyici bir genel-tarama sinyalidir (tek başına
 Sınıf ayrımı her dedektörün kendi şekil/renk mantığıyla sağlanır; yalnızca çatlak–yanık
 çakışmasında tek bir açık hakem kuralı (`arbitrate_overlaps`) devreye girer.
 
-## Boyut/Gönye ve Arka Plan Kalibrasyonu (sabit kamera)
+## Denetim Modu (telefon / sabit kamera)
+
+`config.yaml` içindeki `inspection_mode` iki senaryoyu ayırır:
+
+- **`phone`** (öntanımlı) — telefonla çekilip yüklenen görüntüler. Mesafe/açı
+  değişken olduğundan **boyut/gönye ve deformasyon kararı (RED) etkilemez**
+  (perspektif yanlış RED üretmesin); karar yüzey/çizgi/kenar hatalarına dayanır.
+  Bu sınıflar yine hesaplanır ve raporlanır, ama tek başlarına ürünü reddedemez.
+- **`fixed_camera`** — bant üstü sabit/üstten kamera. Tüm sınıflar (boyut/gönye
+  ve deformasyon dahil) kararda tam etkilidir.
+
+## Boyut/Gönye ve Arka Plan Kalibrasyonu (yalnız sabit kamera)
+
+> Not: Boyut/gönye ve arka plan referansı yalnız `fixed_camera` modunda anlamlıdır;
+> telefon senaryosunda kullanılmaz.
+
 
 Boyut kontrolü öntanımlı kapalıdır. Sabit kamera kurulumunda:
 

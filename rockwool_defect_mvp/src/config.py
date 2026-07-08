@@ -33,6 +33,10 @@ REQUIRED_KEYS = {
 # config.yaml'da bulunmayabilecek yeni ayarlar; REQUIRED_KEYS büyütülmez ki
 # mevcut config dosyaları ve testlerdeki inline config'ler kırılmasın.
 OPTIONAL_KEYS_WITH_DEFAULTS: dict[str, Any] = {
+    # denetim modu: "fixed_camera" (bant/sabit kamera) veya "phone" (telefonla
+    # yüklenen görüntü). phone modunda boyut/gönye ve deformasyon kararı etkilemez
+    # (perspektif yanlış RED üretmesin); yüzey/çizgi/kenar hatalarına odaklanılır.
+    "inspection_mode": "fixed_camera",
     # ürün tespiti
     "background_reference_path": "",
     "roi_snap_enabled": True,
@@ -78,6 +82,7 @@ class AppConfig:
     anomaly_score_suspicious: float
     anomaly_score_defect: float
     # opsiyonel / yeni ayarlar
+    inspection_mode: str
     background_reference_path: Path | None
     roi_snap_enabled: bool
     glass_burn_threshold: float
@@ -170,6 +175,7 @@ def load_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> AppConfig:
         local_anomaly_threshold=float(raw["local_anomaly_threshold"]),
         anomaly_score_suspicious=float(raw["anomaly_score_suspicious"]),
         anomaly_score_defect=float(raw["anomaly_score_defect"]),
+        inspection_mode=str(raw["inspection_mode"]).strip().lower(),
         background_reference_path=(
             resolve_project_path(raw["background_reference_path"])
             if raw.get("background_reference_path")
